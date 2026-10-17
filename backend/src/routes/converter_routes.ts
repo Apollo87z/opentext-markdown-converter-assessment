@@ -4,8 +4,7 @@ import { asyncHandler, HttpError } from '../middleware/errorHandler.js';
 
 const router = Router();
 
-router.post(
-  '/convert', asyncHandler(async (req, res) => {
+router.post('/convert', asyncHandler(async (req, res) => {
     const { url } = req.body ?? {};
 
     if (typeof url !== 'string' || !url.trim()) {
