@@ -17,7 +17,11 @@ router.post('/convert', asyncHandler(async (req, res) => {
     const content = (await response.json())?.response;
     if (!content?.Content) throw new HttpError(502, 'No content found.');
 
-    const result = conversionEngine(content.Content, content.Title ?? `Article ${articleId}`);
+    const result = conversionEngine(
+        content.Content,
+        url,
+        content.Title ?? `Article ${articleId}`,
+    );
 
     return res.json({
         sourceUrl: url,
