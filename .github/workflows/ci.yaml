@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
 
     defaults:
@@ -40,6 +41,7 @@ jobs:
         run: npm run build
 
   frontend:
+    name: Frontend
     runs-on: ubuntu-latest
 
     defaults:
@@ -67,7 +69,8 @@ jobs:
         run: npm run build
 
   publish:
-    needs: [test, frontend]
+    name: Publish
+    needs: [backend, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
