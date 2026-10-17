@@ -1,14 +1,22 @@
 
-import type { ErrorRequestHandler, Request, Response, NextFunction } from 'express';
+import type {
+  ErrorRequestHandler,
+  Request,
+  Response,
+  NextFunction,
+} from 'express';
 
-import { config } from '../config';
 import { logger } from '../lib/logger';
 
 export class HttpError extends Error {
   statusCode: number;
   expose: boolean;
 
-  constructor(statusCode: number, message: string, options: { expose?: boolean } = {}) {
+  constructor(
+    statusCode: number,
+    message: string,
+    options: { expose?: boolean } = {},
+  ) {
     super(message);
     this.name = 'HttpError';
     this.statusCode = statusCode;
@@ -17,7 +25,13 @@ export class HttpError extends Error {
 }
 
 export const asyncHandler =
-  (handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown) =>
+  (
+    handler: (
+      req: Request,
+      res: Response,
+      next: NextFunction,
+    ) => Promise<unknown> | unknown,
+  ) =>
   (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
@@ -55,14 +69,24 @@ const getStatusCode = (error: unknown): number => {
   return 500;
 };
 
-export const notFoundHandler = (req: Request, res: Response, next: NextFunction) => {
+export const notFoundHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   next(new HttpError(404, 'Route not found'));
 };
 
-export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (
+  error,
+  req,
+  res,
+  _next,
+) => {
   const requestLogger = (req as any).log ?? logger;
   const statusCode = getStatusCode(error);
 
+  // Keep technical details in server logs, never in API responses.
   const logContext = {
     err: error,
     request: {
@@ -76,37 +100,39 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (statusCode >= 500) {
     requestLogger.error(
       logContext,
-      error instanceof HttpError ? 'HTTP error handled' : 'Unhandled server error',
+      error instanceof HttpError
+        ? 'HTTP error handled'
+        : 'Unhandled server error',
     );
   } else {
     requestLogger.warn(logContext, 'Request error handled');
   }
 
+  const exposedMessage =
+    error instanceof HttpError && error.expose
+      ? error.message
+      : undefined;
+
   const safeError =
-    statusCode === 404 ? 'Route not found'
-    : statusCode === 400 ? 'Validation failed'
-    : statusCode === 401 ? 'Unauthorized'
-    : statusCode === 403 ? 'Forbidden'
-    : statusCode === 429 ? 'Too many requests'
-    : 'Internal server error';
+    exposedMessage ??
+    (statusCode === 404 ? 'Route not found'
+      : statusCode === 400 ? 'Validation failed'
+      : statusCode === 401 ? 'Unauthorized'
+      : statusCode === 403 ? 'Forbidden'
+      : statusCode === 429 ? 'Too many requests'
+      : 'Internal server error');
 
   const safeMessage =
-    statusCode === 404 ? 'The requested route does not exist.'
-    : statusCode === 400 ? getErrorMessage(error, 'The request is invalid.')
-    : statusCode === 401 ? 'Authentication is required to access this resource.'
-    : statusCode === 403 ? 'You do not have permission to perform this action.'
-    : statusCode === 429 ? 'Too many requests. Please try again later.'
-    : 'Something went wrong on the server.';
+    exposedMessage ??
+    (statusCode === 404 ? 'The requested route could not be found.'
+      : statusCode === 400 ? getErrorMessage(error, 'Please check your request and try again.')
+      : statusCode === 401 ? 'Please sign in to access this resource.'
+      : statusCode === 403 ? 'You do not have permission to perform this action.'
+      : statusCode === 429 ? 'Too many requests. Please try again later.'
+      : 'Something went wrong. Please try again later.');
 
-  const responseBody: Record<string, unknown> = {
+  return res.status(statusCode).json({
     status: 'error',
-    error: safeError,
     message: safeMessage,
-  };
-
-  if (config.env !== 'production' && statusCode >= 500 && error instanceof Error && error.stack) {
-    responseBody.stack = error.stack;
-  }
-
-  return res.status(statusCode).json(responseBody);
+  });
 };
