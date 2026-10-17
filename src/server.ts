@@ -13,7 +13,7 @@ const shutdown = (signal: string) => {
         process.exit(0);
     });
     setTimeout(() => process.exit(1), 10_000).unref();
-};
+}; 
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

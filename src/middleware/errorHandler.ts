@@ -1,3 +1,4 @@
+
 import type { ErrorRequestHandler, Request, Response, NextFunction } from 'express';
 
 import { config } from '../config';
@@ -47,17 +48,9 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 const getStatusCode = (error: unknown): number => {
-  if (error instanceof HttpError) {
-    return error.statusCode;
-  }
-
-  if (error instanceof SyntaxError && 'body' in error) {
-    return 400;
-  }
-
-  if (isValidationError(error)) {
-    return 400;
-  }
+  if (error instanceof HttpError) return error.statusCode;
+  if (error instanceof SyntaxError && 'body' in error) return 400;
+  if (isValidationError(error)) return 400;
 
   return 500;
 };
@@ -70,59 +63,40 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   const requestLogger = (req as any).log ?? logger;
   const statusCode = getStatusCode(error);
 
+  const logContext = {
+    err: error,
+    request: {
+      method: req.method,
+      url: req.originalUrl,
+      route: req.route?.path,
+      requestId: (req as any).id,
+    },
+  };
+
   if (statusCode >= 500) {
     requestLogger.error(
-      {
-        err: error,
-        request: {
-          method: req.method,
-          url: req.originalUrl,
-          route: req.route?.path,
-          requestId: (req as any).id,
-        },
-      },
-      'Unhandled server error',
+      logContext,
+      error instanceof HttpError ? 'HTTP error handled' : 'Unhandled server error',
     );
   } else {
-    requestLogger.warn(
-      {
-        err: error,
-        request: {
-          method: req.method,
-          url: req.originalUrl,
-          route: req.route?.path,
-          requestId: (req as any).id,
-        },
-      },
-      'Request error handled',
-    );
+    requestLogger.warn(logContext, 'Request error handled');
   }
 
   const safeError =
-    statusCode === 404
-      ? 'Route not found'
-      : statusCode === 400
-        ? 'Validation failed'
-        : statusCode === 401
-          ? 'Unauthorized'
-          : statusCode === 403
-            ? 'Forbidden'
-            : statusCode === 429
-              ? 'Too many requests'
-              : 'Internal server error';
+    statusCode === 404 ? 'Route not found'
+    : statusCode === 400 ? 'Validation failed'
+    : statusCode === 401 ? 'Unauthorized'
+    : statusCode === 403 ? 'Forbidden'
+    : statusCode === 429 ? 'Too many requests'
+    : 'Internal server error';
 
   const safeMessage =
-    statusCode === 404
-      ? 'The requested route does not exist.'
-      : statusCode === 400
-        ? getErrorMessage(error, 'The request is invalid.')
-        : statusCode === 401
-          ? 'Authentication is required to access this resource.'
-          : statusCode === 403
-            ? 'You do not have permission to perform this action.'
-            : statusCode === 429
-              ? 'Too many requests. Please try again later.'
-              : 'Something went wrong on the server.';
+    statusCode === 404 ? 'The requested route does not exist.'
+    : statusCode === 400 ? getErrorMessage(error, 'The request is invalid.')
+    : statusCode === 401 ? 'Authentication is required to access this resource.'
+    : statusCode === 403 ? 'You do not have permission to perform this action.'
+    : statusCode === 429 ? 'Too many requests. Please try again later.'
+    : 'Something went wrong on the server.';
 
   const responseBody: Record<string, unknown> = {
     status: 'error',
