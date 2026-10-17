@@ -3,9 +3,12 @@ import test from 'node:test';
 
 import { conversionEngine } from '../src/services/markdown_converter.service';
 
+const sourceUrl = 'https://my.opentext.com/support/article/1986936';
+
 test('conversionEngine converts HTML content into markdown and trims the title', () => {
   const result = conversionEngine(
     '<h1>  Example Title  </h1><nav>Menu</nav><p>Hello <strong>world</strong>!</p>',
+    sourceUrl,
     '  Example Title  ',
   );
 
@@ -18,6 +21,7 @@ test('conversionEngine converts HTML content into markdown and trims the title',
 test('conversionEngine strips non-content DOM elements before conversion', () => {
   const result = conversionEngine(
     '<header>Header</header><main><p>Visible content</p></main><footer>Footer</footer>',
+    sourceUrl,
     'Visible page',
   );
 
@@ -28,7 +32,12 @@ test('conversionEngine strips non-content DOM elements before conversion', () =>
 
 test('conversionEngine throws an error when the converted markdown is empty', () => {
   assert.throws(
-    () => conversionEngine('<script>alert("x")</script><style>body{color:red}</style>', 'Title'),
+    () =>
+      conversionEngine(
+        '<script>alert("x")</script><style>body{color:red}</style>',
+        sourceUrl,
+        'Title',
+      ),
     /Article content is empty after Markdown conversion/,
   );
 });

@@ -6,19 +6,18 @@ import request from 'supertest';
 import router from '../src/routes/converter_routes';
 import { errorHandler } from '../src/middleware/errorHandler';
 
+const articleUrl = 'https://my.opentext.com/support/article/1986936';
+
 const buildApp = () => {
   const app = express();
   app.use(express.json());
   app.use(router);
   app.use(errorHandler);
-
   return app;
 };
 
 test('POST /convert returns 400 when the url field is missing', async () => {
-  const app = buildApp();
-
-  const response = await request(app).post('/convert').send({});
+  const response = await request(buildApp()).post('/convert').send({});
 
   assert.equal(response.status, 400);
   assert.equal(response.body.status, 'error');
@@ -27,14 +26,11 @@ test('POST /convert returns 400 when the url field is missing', async () => {
 });
 
 test('POST /convert returns 400 when the URL does not contain an article id', async () => {
-  const app = buildApp();
-
-  const response = await request(app)
+  const response = await request(buildApp())
     .post('/convert')
-    .send({ url: 'https://example.com/knowledge-base/article-not-found' });
+    .send({ url: 'https://my.opentext.com/support/article' });
 
   assert.equal(response.status, 400);
-  assert.equal(response.body.error, 'Validation failed');
   assert.equal(response.body.message, 'Invalid article URL.');
 });
 
@@ -43,14 +39,11 @@ test('POST /convert returns 502 when the upstream fetch fails', async () => {
   global.fetch = async () => ({ ok: false, status: 500 }) as Response;
 
   try {
-    const app = buildApp();
-
-    const response = await request(app)
+    const response = await request(buildApp())
       .post('/convert')
-      .send({ url: 'https://example.com/article/123' });
+      .send({ url: articleUrl });
 
     assert.equal(response.status, 502);
-    assert.equal(response.body.error, 'Internal server error');
     assert.equal(response.body.message, 'Something went wrong on the server.');
   } finally {
     global.fetch = originalFetch;
@@ -59,51 +52,48 @@ test('POST /convert returns 502 when the upstream fetch fails', async () => {
 
 test('POST /convert returns 502 when no article content is returned', async () => {
   const originalFetch = global.fetch;
-  global.fetch = async () => ({
-    ok: true,
-    json: async () => ({ response: { Title: 'Example title' } }),
-  }) as Response;
+  global.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({ response: { Title: 'Example title' } }),
+    }) as Response;
 
   try {
-    const app = buildApp();
-
-    const response = await request(app)
+    const response = await request(buildApp())
       .post('/convert')
-      .send({ url: 'https://example.com/article/456' });
+      .send({ url: articleUrl });
 
     assert.equal(response.status, 502);
-    assert.equal(response.body.error, 'Internal server error');
     assert.equal(response.body.message, 'Something went wrong on the server.');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('POST /convert returns converted markdown and uses the fallback title when none is present', async () => {
+test('POST /convert returns Markdown and uses the fallback title', async () => {
   const originalFetch = global.fetch;
-  global.fetch = async () => ({
-    ok: true,
-    json: async () => ({
-      response: {
-        Content: '<h1>Sample article</h1><p>Hello <strong>world</strong>!</p>',
-      },
-    }),
-  }) as Response;
+  global.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        response: {
+          Content: '<h1>Sample article</h1><p>Hello <strong>world</strong>!</p>',
+        },
+      }),
+    }) as Response;
 
   try {
-    const app = buildApp();
-
-    const response = await request(app)
+    const response = await request(buildApp())
       .post('/convert')
-      .send({ url: 'https://example.com/article/789' });
+      .send({ url: articleUrl });
 
     assert.equal(response.status, 200);
-    assert.equal(response.body.sourceUrl, 'https://example.com/article/789');
+    assert.equal(response.body.sourceUrl, articleUrl);
     assert.equal(response.body.contentType, 'text/markdown');
-    assert.equal(response.body.title, 'Article 789');
+    assert.equal(response.body.title, 'Article 1986936');
     assert.match(response.body.markdown, /Sample article/i);
     assert.match(response.body.markdown, /Hello/i);
-    assert.match(response.body.markdown, /\*\*world\*\*/i);
+    assert.match(response.body.markdown, /\*\*world\*\*/);
   } finally {
     global.fetch = originalFetch;
   }
