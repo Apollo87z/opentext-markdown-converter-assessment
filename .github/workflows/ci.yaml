@@ -2,14 +2,15 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, dev]
+    branches: ['**']
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
 
     defaults:
@@ -39,8 +40,37 @@ jobs:
       - name: Build application
         run: npm run build
 
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Build application
+        run: npm run build
+
   publish:
-    needs: test
+    name: Publish
+    needs: [backend, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
@@ -67,10 +97,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-platform image
+      - name: Build and push backend image
         uses: docker/build-push-action@v6
         with:
           context: ./backend
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/apollo87z/opentext-markdown-converter-assessment:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/apollo87z/opentext-markdown-converter-assessment-frontend:latest

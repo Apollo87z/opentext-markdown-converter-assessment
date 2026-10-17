@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    container_name: markdown-converter-backend
+    ports:
+      - "3000:3000" 
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: markdown-converter-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
