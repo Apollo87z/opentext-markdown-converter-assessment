@@ -24,6 +24,7 @@ turndown.addRule('codeBlocks', {
   },
 });
 
+
 export function conversionEngine(
   input: string,
   sourceUrl: string,
@@ -36,6 +37,13 @@ export function conversionEngine(
   const dom = new JSDOM(input, { url: sourceUrl });
   const document = dom.window.document;
 
+  document
+    .querySelectorAll(
+      'script, style, nav, header, footer, aside, noscript',
+    )
+    .forEach((element) => element.remove());
+
+  // Convert prose inside <pre> to a paragraph.
   document.querySelectorAll('pre:not(:has(code))').forEach((pre) => {
     const paragraph = document.createElement('p');
     paragraph.textContent = pre.textContent?.trim() ?? '';
@@ -43,14 +51,21 @@ export function conversionEngine(
   });
 
   const article = new Readability(document).parse();
-  const title = article?.title?.trim() || fallbackTitle;
+  const title = article?.title?.trim() || fallbackTitle.trim();
   const html = article?.content || document.body.innerHTML;
 
   dom.window.close();
 
+  const markdown = turndown.turndown(html).trim();
+
+  if (!markdown) {
+    throw new Error('Article content is empty after Markdown conversion');
+  }
+
   return {
     title,
-    markdown: turndown.turndown(html).trim(),
+    markdown,
   };
 }
+
 
