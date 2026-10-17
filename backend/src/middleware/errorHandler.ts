@@ -1,4 +1,3 @@
-
 import type {
   ErrorRequestHandler,
   Request,
@@ -114,13 +113,14 @@ export const errorHandler: ErrorRequestHandler = (
       : undefined;
 
   const safeError =
-    exposedMessage ??
-    (statusCode === 404 ? 'Route not found'
-      : statusCode === 400 ? 'Validation failed'
-      : statusCode === 401 ? 'Unauthorized'
-      : statusCode === 403 ? 'Forbidden'
-      : statusCode === 429 ? 'Too many requests'
-      : 'Internal server error');
+    statusCode === 404 ? 'Route not found'
+    : statusCode === 400 ? 'Validation failed'
+    : statusCode === 401 ? 'Unauthorized'
+    : statusCode === 403 ? 'Forbidden'
+    : statusCode === 406 ? 'Not acceptable'
+    : statusCode === 429 ? 'Too many requests'
+    : statusCode === 502 ? 'Bad gateway'
+    : 'Internal server error';
 
   const safeMessage =
     exposedMessage ??
@@ -133,6 +133,7 @@ export const errorHandler: ErrorRequestHandler = (
 
   return res.status(statusCode).json({
     status: 'error',
+    error: safeError, // CHANGED: this field was missing before
     message: safeMessage,
   });
 };

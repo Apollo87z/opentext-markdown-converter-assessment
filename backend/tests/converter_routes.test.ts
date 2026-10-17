@@ -16,6 +16,21 @@ const buildApp = () => {
   return app;
 };
 
+// Replaces global.fetch for one test and always restores it afterwards.
+const withMockedFetch = async (
+  mock: typeof fetch,
+  run: () => Promise<void>,
+) => {
+  const originalFetch = global.fetch;
+  global.fetch = mock;
+
+  try {
+    await run();
+  } finally {
+    global.fetch = originalFetch;
+  }
+};
+
 test('POST /convert returns 400 when the url field is missing', async () => {
   const response = await request(buildApp()).post('/convert').send({});
 
@@ -35,66 +50,106 @@ test('POST /convert returns 400 when the URL does not contain an article id', as
 });
 
 test('POST /convert returns 502 when the upstream fetch fails', async () => {
-  const originalFetch = global.fetch;
-  global.fetch = async () => ({ ok: false, status: 500 }) as Response;
+  await withMockedFetch(
+    async () => ({ ok: false, status: 500 }) as Response,
+    async () => {
+      const response = await request(buildApp())
+        .post('/convert')
+        .send({ url: articleUrl });
 
-  try {
-    const response = await request(buildApp())
-      .post('/convert')
-      .send({ url: articleUrl });
-
-    assert.equal(response.status, 502);
-    assert.equal(response.body.message, 'Something went wrong on the server.');
-  } finally {
-    global.fetch = originalFetch;
-  }
+      assert.equal(response.status, 502);
+      assert.equal(response.body.error, 'Bad gateway');
+      assert.equal(response.body.message, 'Failed to load article.');
+    },
+  );
 });
 
 test('POST /convert returns 502 when no article content is returned', async () => {
-  const originalFetch = global.fetch;
-  global.fetch = async () =>
-    ({
-      ok: true,
-      json: async () => ({ response: { Title: 'Example title' } }),
-    }) as Response;
+  await withMockedFetch(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({ response: { Title: 'Example title' } }),
+      }) as Response,
+    async () => {
+      const response = await request(buildApp())
+        .post('/convert')
+        .send({ url: articleUrl });
 
-  try {
-    const response = await request(buildApp())
-      .post('/convert')
-      .send({ url: articleUrl });
-
-    assert.equal(response.status, 502);
-    assert.equal(response.body.message, 'Something went wrong on the server.');
-  } finally {
-    global.fetch = originalFetch;
-  }
+      assert.equal(response.status, 502);
+      assert.equal(response.body.message, 'Failed to load article.');
+    },
+  );
 });
 
-test('POST /convert returns Markdown and uses the fallback title', async () => {
-  const originalFetch = global.fetch;
-  global.fetch = async () =>
-    ({
-      ok: true,
-      json: async () => ({
-        response: {
-          Content: '<h1>Sample article</h1><p>Hello <strong>world</strong>!</p>',
-        },
-      }),
-    }) as Response;
+test('POST /convert returns JSON with the fallback title when Accept is application/json', async () => {
+  await withMockedFetch(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          response: {
+            Content:
+              '<h1>Sample article</h1><p>Hello <strong>world</strong>!</p>',
+          },
+        }),
+      }) as Response,
+    async () => {
+      const response = await request(buildApp())
+        .post('/convert')
+        .set('Accept', 'application/json')
+        .send({ url: articleUrl });
 
-  try {
-    const response = await request(buildApp())
-      .post('/convert')
-      .send({ url: articleUrl });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.status, 'success');
+      assert.equal(response.body.sourceUrl, articleUrl);
+      assert.equal(response.body.contentType, 'text/markdown');
+      assert.equal(response.body.article.title, 'Article 1986936');
+      assert.match(response.body.markdown, /Sample article/i);
+      assert.match(response.body.markdown, /Hello/i);
+      assert.match(response.body.markdown, /\*\*world\*\*/);
+    },
+  );
+});
 
-    assert.equal(response.status, 200);
-    assert.equal(response.body.sourceUrl, articleUrl);
-    assert.equal(response.body.contentType, 'text/markdown');
-    assert.equal(response.body.title, 'Article 1986936');
-    assert.match(response.body.markdown, /Sample article/i);
-    assert.match(response.body.markdown, /Hello/i);
-    assert.match(response.body.markdown, /\*\*world\*\*/);
-  } finally {
-    global.fetch = originalFetch;
-  }
+test('POST /convert returns Markdown with front matter by default', async () => {
+  await withMockedFetch(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          response: { Content: '<p>Hello <strong>world</strong></p>' },
+        }),
+      }) as Response,
+    async () => {
+      const response = await request(buildApp())
+        .post('/convert')
+        .send({ url: articleUrl });
+
+      assert.equal(response.status, 200);
+      assert.match(response.headers['content-type'], /text\/markdown/);
+      assert.match(response.text, /^---\nstatus: success/);
+      assert.match(response.text, /sourceUrl: "https:\/\/my\.opentext\.com/);
+      assert.match(response.text, /\*\*world\*\*/);
+    },
+  );
+});
+
+test('POST /convert returns 406 for unsupported Accept types', async () => {
+  await withMockedFetch(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({ response: { Content: '<p>Hi</p>' } }),
+      }) as Response,
+    async () => {
+      const response = await request(buildApp())
+        .post('/convert')
+        .set('Accept', 'text/html')
+        .send({ url: articleUrl });
+
+      assert.equal(response.status, 406);
+      assert.equal(response.body.error, 'Not acceptable');
+    },
+  );
 });

@@ -1,4 +1,3 @@
-
 import { Router } from 'express';
 import { conversionEngine } from '../services/markdown_converter.service.js';
 import { asyncHandler, HttpError } from '../middleware/errorHandler.js';
@@ -6,8 +5,7 @@ import { asyncHandler, HttpError } from '../middleware/errorHandler.js';
 const router = Router();
 
 router.post(
-  '/convert',
-  asyncHandler(async (req, res) => {
+  '/convert', asyncHandler(async (req, res) => {
     const { url } = req.body ?? {};
 
     if (typeof url !== 'string' || !url.trim()) {
@@ -80,7 +78,7 @@ router.post(
 
     const accept = req.get('Accept');
 
-    // Return JSON only when explicitly requested.
+
     if (accept?.includes('application/json')) {
       return res.status(200).json({
         status,
@@ -91,7 +89,7 @@ router.post(
       });
     }
 
-    // Reject explicitly unsupported response formats.
+
     if (
       accept &&
       !accept.includes('text/markdown') &&
@@ -103,7 +101,7 @@ router.post(
       );
     }
 
-    // Markdown is the default response format.
+
     const frontMatter = [
       '---',
       `status: ${status}`,
@@ -120,13 +118,13 @@ router.post(
         name: string;
         versions: string[];
       }) => [
-        `  - id: ${JSON.stringify(product.id)}`,
-        `    name: ${JSON.stringify(product.name)}`,
-        '    versions:',
-        ...product.versions.map(
-          (version: string) => `      - ${JSON.stringify(version)}`,
-        ),
-      ]),
+          `  - id: ${JSON.stringify(product.id)}`,
+          `    name: ${JSON.stringify(product.name)}`,
+          '    versions:',
+          ...product.versions.map(
+            (version: string) => `      - ${JSON.stringify(version)}`,
+          ),
+        ]),
       '---',
       '',
     ].join('\n');
