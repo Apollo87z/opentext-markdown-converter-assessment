@@ -2,9 +2,10 @@ import type { Request, Response } from 'express';
 import { conversionEngine } from '../services/markdown_converter.service.js';
 import { HttpError } from '../middleware/errorHandler.js';
 
-const ARTICLE_API = 'https://my.opentext.com/api/web/support/article';
-const OPENTEXT_BASE_URL = 'https://my.opentext.com';
+const ARTICLE_API =
+  'https://my.opentext.com/api/web/support/article';
 
+const OPENTEXT_BASE_URL = 'https://my.opentext.com';
 
 async function loadArticle(url: unknown) {
   if (typeof url !== 'string' || !url.trim() || url.length > 2048) {
@@ -65,7 +66,6 @@ async function loadArticle(url: unknown) {
   return { url, articleId, content, result };
 }
 
-
 function safeAttachmentUrl(attachment: any): string | null {
   for (const candidate of [attachment.url, attachment.fileUrl]) {
     if (typeof candidate !== 'string') continue;
@@ -84,7 +84,6 @@ function safeAttachmentUrl(attachment: any): string | null {
   return null;
 }
 
-
 function buildAttachments(content: any) {
   return (Array.isArray(content.Attachments) ? content.Attachments : []).map(
     (attachment: any) => ({
@@ -97,7 +96,6 @@ function buildAttachments(content: any) {
     }),
   );
 }
-
 
 function buildArticleMeta(content: any, title: string) {
   return {
@@ -114,24 +112,25 @@ function buildArticleMeta(content: any, title: string) {
       ? new Date(content.LastContentUpdateTime).toISOString()
       : null,
 
-    products: (content.Products ?? []).map((product: any) => ({
-      id: product.Id,
-      name: product.DisplayLabel,
-      versions: (product.versions ?? []).map(
-        (version: any) => version.version,
-      ),
-    })),
+    products: (Array.isArray(content.Products) ? content.Products : []).map(
+      (product: any) => ({
+        id: product.Id,
+        name: product.DisplayLabel,
+        versions: (product.versions ?? []).map(
+          (version: any) => version.version,
+        ),
+      }),
+    ),
 
     attachments: buildAttachments(content),
 
-    relatedArticles: (content.RelatedArticles ?? []).map(
-      (article: any) => article,
-    ),
+    relatedArticles: Array.isArray(content.RelatedArticles)
+      ? content.RelatedArticles
+      : [],
   };
 }
 
 type ArticleMeta = ReturnType<typeof buildArticleMeta>;
-
 
 function buildFrontMatter(
   article: ArticleMeta,
@@ -175,7 +174,6 @@ function buildFrontMatter(
   ].join('\n');
 }
 
-
 function buildAttachmentsMarkdown(content: any) {
   const attachments = buildAttachments(content);
 
@@ -212,50 +210,41 @@ function buildAttachmentsMarkdown(content: any) {
   ].join('\n');
 }
 
-
 export async function getArticle(req: Request, res: Response) {
-  const { url, result, content } = await loadArticle(req.query.url);
+  const { url, content, result } = await loadArticle(req.query.url);
+
   const article = buildArticleMeta(content, result.title);
-  const frontMatter = buildFrontMatter(article, String(url));
+  const frontMatter = buildFrontMatter(article, url);
   const attachmentsMarkdown = buildAttachmentsMarkdown(content);
 
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=31536000');
-
-  return res
-    .status(200)
-    .type('text/markdown')
-    .send(`${frontMatter}\n${result.markdown}\n${attachmentsMarkdown}`);
-}
-
-
-export async function convertArticle(req: Request, res: Response) {
-  const { url, content, result } = await loadArticle(req.body?.url);
-
-  const article = buildArticleMeta(content, result.title);
-  const status = 'success';
+  const markdown = [
+    frontMatter,
+    result.markdown,
+    attachmentsMarkdown,
+  ].join('\n');
 
   res.vary('Accept');
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=31536000');
 
-  const accept = req.get('Accept');
+  const accept = req.get('Accept')?.toLowerCase();
 
+  // Return JSON when explicitly requested.
   if (accept?.includes('application/json')) {
     return res.status(200).json({
-      status,
+      status: 'success',
       sourceUrl: url,
       contentType: 'text/markdown',
       article,
-      markdown: [
-        buildFrontMatter(article, url, status),
-        result.markdown,
-        buildAttachmentsMarkdown(content),
-      ].join('\n'),
+      markdown,
     });
   }
 
+  // Markdown is the default. Reject unsupported formats.
   if (
     accept &&
     !accept.includes('text/markdown') &&
-    !accept.includes('*/*')
+    !accept.includes('*/*') &&
+    !accept.includes('text/*')
   ) {
     throw new HttpError(
       406,
@@ -263,11 +252,8 @@ export async function convertArticle(req: Request, res: Response) {
     );
   }
 
-  const frontMatter = buildFrontMatter(article, url, status);
-  const attachmentsMarkdown = buildAttachmentsMarkdown(content);
-
   return res
     .status(200)
     .type('text/markdown')
-    .send(`${frontMatter}\n${result.markdown}\n${attachmentsMarkdown}`);
+    .send(markdown);
 }
