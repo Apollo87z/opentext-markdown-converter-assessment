@@ -784,7 +784,7 @@ export default function LivePreview() {
                   <strong>
                     Last refreshed{' '}
                     {displayedCacheAge === null
-                      ? '—'
+                      ? 'Just Now'
                       : formatCacheAge(displayedCacheAge)}
                   </strong>
                 </div>
