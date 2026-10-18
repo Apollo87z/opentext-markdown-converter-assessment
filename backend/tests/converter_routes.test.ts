@@ -389,7 +389,7 @@ test('GET /articles sets Vary: Accept', async () => {
   assert.match(response.headers.vary, /Accept/i);
 });
 
-test('GET /articles returns Markdown and the s-maxage cache header', async () => {
+test('GET /articles returns Markdown with a 24-hour shared cache header', async () => {
   await withMockedFetch(
     (async () => successResponse()) as typeof fetch,
     async () => {
@@ -399,7 +399,7 @@ test('GET /articles returns Markdown and the s-maxage cache header', async () =>
         .set('Accept', 'text/markdown');
 
       assert.equal(response.status, 200);
-      assert.match(response.headers['cache-control'], /s-maxage=31536000/);
+      assert.match(response.headers['cache-control'], /s-maxage=86400/);
       assert.match(response.text, /^---/);
       assert.match(response.text, /Hello/);
     },
