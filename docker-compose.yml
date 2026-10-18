@@ -3,10 +3,11 @@ services:
     build: ./backend
     container_name: markdown-converter-backend
     ports:
-      - "3000:3000" 
+      - "3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
+      CORS_ORIGINS: "http://localhost:8080"
     restart: unless-stopped
 
   frontend:
