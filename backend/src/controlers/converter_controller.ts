@@ -1,4 +1,10 @@
+
 import type { Request, Response } from 'express';
+import {
+  CloudFrontClient,
+  CreateInvalidationCommand,
+} from '@aws-sdk/client-cloudfront';
+
 import { conversionEngine } from '../services/markdown_converter.service.js';
 import { HttpError } from '../middleware/errorHandler.js';
 
@@ -6,6 +12,10 @@ const ARTICLE_API =
   'https://my.opentext.com/api/web/support/article';
 
 const OPENTEXT_BASE_URL = 'https://my.opentext.com';
+const CLOUDFRONT_DISTRIBUTION_ID =
+  process.env.CLOUDFRONT_DISTRIBUTION_ID;
+
+const cloudFront = new CloudFrontClient({ region: 'us-east-1' });
 
 async function loadArticle(url: unknown) {
   if (typeof url !== 'string' || !url.trim() || url.length > 2048) {
@@ -57,13 +67,44 @@ async function loadArticle(url: unknown) {
     throw new HttpError(502, 'Invalid article response.');
   }
 
+  const fetchedAt = new Date().toISOString();
+
   const result = conversionEngine(
     content.Content,
     url,
     content.Title || `Article ${articleId}`,
   );
 
-  return { url, articleId, content, result };
+  return { url, articleId, content, result, fetchedAt };
+}
+
+async function invalidateArticleCache() {
+  if (!CLOUDFRONT_DISTRIBUTION_ID) {
+    throw new HttpError(
+      500,
+      'CloudFront invalidation is not configured.',
+    );
+  }
+
+  try {
+    const response = await cloudFront.send(
+      new CreateInvalidationCommand({
+        DistributionId: CLOUDFRONT_DISTRIBUTION_ID,
+        InvalidationBatch: {
+          CallerReference: `article-refresh-${Date.now()}-${Math.random()}`,
+          Paths: {
+            Quantity: 1,
+            // Invalidate the normal endpoint and its query-string variants.
+            Items: ['/api/v1/articles*'],
+          },
+        },
+      }),
+    );
+
+    return response.Invalidation?.Id;
+  } catch {
+    throw new HttpError(502, 'Failed to invalidate the CloudFront cache.');
+  }
 }
 
 function safeAttachmentUrl(attachment: any): string | null {
@@ -135,17 +176,18 @@ type ArticleMeta = ReturnType<typeof buildArticleMeta>;
 function buildFrontMatter(
   article: ArticleMeta,
   sourceUrl: string,
-  status = 'success',
+  fetchedAt: string,
 ) {
   return [
     '---',
-    `status: ${status}`,
+    'status: success',
     `id: ${JSON.stringify(article.id)}`,
     `title: ${JSON.stringify(article.title)}`,
     `type: ${JSON.stringify(article.type)}`,
     `views: ${article.views ?? 0}`,
     `createdAt: ${JSON.stringify(article.createdAt)}`,
     `updatedAt: ${JSON.stringify(article.updatedAt)}`,
+    `fetchedAt: ${JSON.stringify(fetchedAt)}`,
     `sourceUrl: ${JSON.stringify(sourceUrl)}`,
     'products:',
     ...article.products.flatMap(
@@ -211,24 +253,49 @@ function buildAttachmentsMarkdown(content: any) {
 }
 
 export async function getArticle(req: Request, res: Response) {
-  const { url, content, result } = await loadArticle(req.query.url);
+  const forceRefresh = req.query.forceRefresh === 'true';
+
+  if (
+    req.query.forceRefresh !== undefined &&
+    req.query.forceRefresh !== 'true' &&
+    req.query.forceRefresh !== 'false'
+  ) {
+    throw new HttpError(400, 'forceRefresh must be true or false.');
+  }
+
+  const { url, content, result, fetchedAt } = await loadArticle(
+    req.query.url,
+  );
 
   const article = buildArticleMeta(content, result.title);
-  const frontMatter = buildFrontMatter(article, url);
-  const attachmentsMarkdown = buildAttachmentsMarkdown(content);
 
   const markdown = [
-    frontMatter,
+    buildFrontMatter(article, url, fetchedAt),
     result.markdown,
-    attachmentsMarkdown,
+    buildAttachmentsMarkdown(content),
   ].join('\n');
 
+  let invalidationId: string | undefined;
+
+  if (forceRefresh) {
+    // Invalidate the shared normal-response cache after fetching successfully.
+    invalidationId = await invalidateArticleCache();
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('CDN-Cache-Control', 'no-store');
+    res.setHeader('X-Article-Fetched-At', fetchedAt);
+  } else {
+    res.setHeader(
+      'Cache-Control',
+      'public, max-age=0, s-maxage=31536000',
+    );
+    res.setHeader('X-Article-Fetched-At', fetchedAt);
+  }
+
   res.vary('Accept');
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=31536000');
 
   const accept = req.get('Accept')?.toLowerCase();
 
-  // Return JSON when explicitly requested.
   if (accept?.includes('application/json')) {
     return res.status(200).json({
       status: 'success',
@@ -236,10 +303,12 @@ export async function getArticle(req: Request, res: Response) {
       contentType: 'text/markdown',
       article,
       markdown,
+      fetchedAt,
+      forceRefresh,
+      ...(invalidationId ? { invalidationId } : {}),
     });
   }
 
-  // Markdown is the default. Reject unsupported formats.
   if (
     accept &&
     !accept.includes('text/markdown') &&
