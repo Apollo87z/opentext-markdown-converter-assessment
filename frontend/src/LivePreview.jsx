@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseMarkdownMetadata } from './utils/markdown';
@@ -27,6 +27,46 @@ function formatDate(value) {
   }).format(date);
 }
 
+function formatTimeAgo(value, now = Date.now()) {
+  if (!value) return 'Unknown';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown';
+  }
+
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((now - date.getTime()) / 1000)
+  );
+
+  if (elapsedSeconds < 60) return 'just now';
+
+  const minutes = Math.floor(elapsedSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  if (days < 30) {
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  }
+
+  const months = Math.floor(days / 30);
+  if (months < 12) {
+    return `${months} month${months === 1 ? '' : 's'} ago`;
+  }
+
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? '' : 's'} ago`;
+}
+
 export default function LivePreview() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [markdown, setMarkdown] = useState('');
@@ -36,6 +76,16 @@ export default function LivePreview() {
   const [apiKey, setApiKey] = useState('');
   const [generatingKey, setGeneratingKey] = useState(false);
   const [notice, setNotice] = useState('');
+  const [fetchedAt, setFetchedAt] = useState('');
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   const { metadata, body } = parseMarkdownMetadata(markdown);
 
@@ -45,6 +95,7 @@ export default function LivePreview() {
     setNotice('');
     setApiKey('');
     setMarkdown('');
+    setFetchedAt('');
 
     try {
       const res = await fetch('/api/v1/generate-key', {
@@ -86,9 +137,7 @@ export default function LivePreview() {
     }
   };
 
-  const convert = async (event) => {
-    event.preventDefault();
-
+  const fetchArticle = async (forceRefresh = false) => {
     if (!apiKey) {
       setError('Generate temporary access before converting an article.');
       return;
@@ -100,6 +149,10 @@ export default function LivePreview() {
 
     try {
       const params = new URLSearchParams({ url });
+
+      if (forceRefresh) {
+        params.set('forceRefresh', 'true');
+      }
 
       const res = await fetch(
         `/api/v1/articles?${params.toString()}`,
@@ -134,9 +187,22 @@ export default function LivePreview() {
 
       setMarkdown(text);
       setRaw(false);
-      setNotice('Article converted successfully.');
+
+      // This timestamp comes from the backend, not the browser clock.
+      setFetchedAt(res.headers.get('x-article-fetched-at') || '');
+
+      setNotice(
+        forceRefresh
+          ? 'Article refreshed successfully.'
+          : 'Article converted successfully.'
+      );
     } catch (err) {
-      setMarkdown('');
+      // Preserve the existing preview if a refresh fails.
+      if (!forceRefresh) {
+        setMarkdown('');
+        setFetchedAt('');
+      }
+
       setError(
         err instanceof Error
           ? err.message
@@ -145,6 +211,15 @@ export default function LivePreview() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const convert = async (event) => {
+    event.preventDefault();
+    await fetchArticle(false);
+  };
+
+  const refreshArticle = async () => {
+    await fetchArticle(true);
   };
 
   const copyMarkdown = async () => {
@@ -467,7 +542,10 @@ export default function LivePreview() {
                   className="text-input"
                   type="url"
                   value={url}
-                  onChange={(event) => setUrl(event.target.value)}
+                  onChange={(event) => {
+                    setUrl(event.target.value);
+                    setFetchedAt('');
+                  }}
                   placeholder="https://example.com/support/article/123"
                   aria-label="Article URL"
                   required
@@ -540,9 +618,13 @@ export default function LivePreview() {
           <section className="conversion-loading" aria-live="polite">
             <span className="loading-spinner" />
             <div>
-              <strong>Converting your article</strong>
+              <strong>
+                {markdown ? 'Refreshing your article' : 'Converting your article'}
+              </strong>
               <p>
-                Fetching the source content and generating Markdown…
+                {markdown
+                  ? 'Fetching the latest source content…'
+                  : 'Fetching the source content and generating Markdown…'}
               </p>
             </div>
           </section>
@@ -606,6 +688,39 @@ export default function LivePreview() {
                   </span>
                 )}
               </div>
+            </div>
+
+            <div className="access-row article-refresh-row">
+              <div className="access-indicator">
+                <span className="access-indicator-dot is-ready" />
+                <div>
+                  <strong>
+                    Last refreshed {formatTimeAgo(fetchedAt, now)}
+                  </strong>
+                  <span>
+                    {fetchedAt
+                      ? formatDate(fetchedAt)
+                      : 'The server did not provide a refresh timestamp.'}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-button access-button"
+                onClick={refreshArticle}
+                disabled={!apiKey || loading || generatingKey}
+                title="Fetch the latest article and invalidate the cached response"
+              >
+                {loading ? (
+                  <>
+                    <span className="button-spinner" />
+                    Refreshing…
+                  </>
+                ) : (
+                  '↻ Refresh article'
+                )}
+              </button>
             </div>
 
             <div className="preview-layout">

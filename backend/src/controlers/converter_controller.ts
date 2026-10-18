@@ -287,7 +287,7 @@ export async function getArticle(req: Request, res: Response) {
   } else {
     res.setHeader(
       'Cache-Control',
-      'public, max-age=0, s-maxage=31536000',
+      'public, max-age=0, s-maxage=86400',
     );
     res.setHeader('X-Article-Fetched-At', fetchedAt);
   }
