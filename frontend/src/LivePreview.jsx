@@ -154,37 +154,44 @@ export default function LivePreview() {
     return <strong>{formatMetadataValue(value)}</strong>;
   };
 
+
   const convert = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      const res = await fetch('/api/v1/convert', {
-        method: 'POST',
+      const params = new URLSearchParams({ url });
+
+      const res = await fetch(`/api/v1/articles?${params.toString()}`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           Accept: 'text/markdown',
         },
-        body: JSON.stringify({ url }),
       });
 
       const text = await res.text();
 
       if (!res.ok) {
         let message = 'Failed to convert article.';
+
         try {
           message = JSON.parse(text).message ?? message;
         } catch {
           // Keep the default message if the response is not JSON.
         }
+
         throw new Error(message);
       }
 
       setMarkdown(text);
     } catch (err) {
       setMarkdown('');
-      setError(err.message);
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to convert article.'
+      );
     } finally {
       setLoading(false);
     }

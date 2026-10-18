@@ -191,24 +191,19 @@ function buildAttachmentsMarkdown(content: any) {
  * GET /articles?url=<article URL>
  * Returns the converted Markdown document.
  */
-router.get(
-  '/articles',
-  asyncHandler(async (req, res) => {
-    const { result, content } = await loadArticle(req.query.url);
+router.get('/articles', asyncHandler(async (req, res) => {
+  const { url, result, content } = await loadArticle(req.query.url);
+  const article = buildArticleMeta(content, result.title);
+  const frontMatter = buildFrontMatter(article, String(url));
+  const attachmentsMarkdown = buildAttachmentsMarkdown(content);
 
-    const attachmentsMarkdown = buildAttachmentsMarkdown(content);
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=31536000');
 
-    res.setHeader(
-      'Cache-Control',
-      'public, max-age=0, s-maxage=31536000',
-    );
-
-    return res
-      .status(200)
-      .type('text/markdown')
-      .send(`${result.markdown}\n${attachmentsMarkdown}`);
-  }),
-);
+  return res
+    .status(200)
+    .type('text/markdown')
+    .send(`${frontMatter}\n${result.markdown}\n${attachmentsMarkdown}`);
+}));
 
 /**
  * POST /convert
