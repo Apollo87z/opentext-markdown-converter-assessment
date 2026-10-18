@@ -209,7 +209,8 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 20px;
-  align-items: flex-start;
+  align-items: stretch;
+  max-height: 72vh;
 }
 
 .markdown-card,
@@ -223,7 +224,11 @@ input {
 }
 
 .markdown-card {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  max-height: 72vh;
+  min-height: 0;
 }
 
 .card-toolbar {
@@ -257,10 +262,13 @@ input {
 .card-body {
   min-height: 360px;
   padding: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .scroll-panel {
-  max-height: 70vh;
+  max-height: 100%;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
@@ -367,6 +375,10 @@ input {
 
 .meta-panel {
   padding: 18px 16px;
+  max-height: 72vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .metadata-list {
@@ -397,6 +409,89 @@ input {
 .metadata-list strong {
   font-weight: 600;
   line-height: 1.5;
+  word-break: break-word;
+}
+
+.metadata-item.nested {
+  gap: 8px;
+}
+
+.metadata-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.metadata-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.metadata-subheader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.metadata-subheader span {
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.95rem;
+}
+
+.metadata-subheader small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.metadata-sublist,
+.metadata-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metadata-detail-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.metadata-detail-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.metadata-detail-list li:last-child {
+  border-bottom: none;
+}
+
+.metadata-detail-list span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metadata-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.metadata-link {
+  color: var(--accent);
   word-break: break-word;
 }
 

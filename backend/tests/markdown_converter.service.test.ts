@@ -30,6 +30,20 @@ test('conversionEngine strips non-content DOM elements before conversion', () =>
   assert.doesNotMatch(result.markdown, /Header|Footer/i);
 });
 
+test('conversionEngine preserves HTML table structure as Markdown tables', () => {
+  const result = conversionEngine(
+    '<table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>Alice</td><td>42</td></tr><tr><td>Bob</td><td>24</td></tr></tbody></table>',
+    sourceUrl,
+    'Table Example',
+  );
+
+  assert.match(result.markdown, /^\| Name \| Value \|/m);
+  assert.match(result.markdown, /^\| --- \| --- \|/m);
+  assert.match(result.markdown, /\| Alice \| 42 \|/m);
+  assert.match(result.markdown, /\| Bob \| 24 \|/m);
+  assert.doesNotMatch(result.markdown, /Name\s*Value\s*Alice\s*42/m);
+});
+
 test('conversionEngine throws an error when the converted markdown is empty', () => {
   assert.throws(
     () =>

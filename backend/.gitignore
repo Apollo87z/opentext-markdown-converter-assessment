@@ -54,3 +54,12 @@ temp/
 # Local test artifacts
 test-results/
 playwright-report/
+
+
+waf/
+scripts/
+current-web-acl.json
+
+md-converter-auth.js
+update-web-acl-fixed.json
+update-web-acl-input.json

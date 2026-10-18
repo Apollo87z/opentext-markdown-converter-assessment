@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +13,147 @@ export default function LivePreview() {
 
   const { metadata, body } = parseMarkdownMetadata(markdown);
 
+  const formatMetadataValue = (value) => {
+    if (value === null || value === undefined || value === '') {
+      return '—';
+    }
+
+    if (Array.isArray(value)) {
+      if (!value.length) {
+        return '—';
+      }
+
+      return value
+        .map((item) => {
+          if (typeof item === 'object' && item !== null) {
+            return JSON.stringify(item);
+          }
+
+          return String(item);
+        })
+        .join(', ');
+    }
+
+    if (typeof value === 'object') {
+      return JSON.stringify(value, null, 2);
+    }
+
+    return String(value);
+  };
+
+  const renderMetadataValue = (key, value) => {
+    if (key === 'products') {
+      if (!Array.isArray(value) || !value.length) {
+        return <div className="metadata-empty">No products available.</div>;
+      }
+
+      return (
+        <div className="metadata-subsection">
+          {value.map((product, index) => {
+            const productId = product?.id ?? `product-${index + 1}`;
+            const productName = product?.name ?? 'Unnamed product';
+            const versions = Array.isArray(product?.versions) ? product.versions : [];
+
+            return (
+              <div key={`${key}-${productId}`} className="metadata-group">
+                <div className="metadata-subheader">
+                  <span>{productName}</span>
+                  <small>{productId}</small>
+                </div>
+
+                {versions.length ? (
+                  <ul className="metadata-sublist">
+                    {versions.map((version, versionIndex) => (
+                      <li key={`${productId}-version-${versionIndex}`}>{formatMetadataValue(version)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="metadata-empty">No versions listed.</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (key === 'attachments') {
+      if (!Array.isArray(value) || !value.length) {
+        return <div className="metadata-empty">No attachments available.</div>;
+      }
+
+      return (
+        <div className="metadata-subsection">
+          {value.map((attachment, index) => {
+            const attachmentId = attachment?.id ?? `attachment-${index + 1}`;
+            const attachmentName = attachment?.name ?? 'Unnamed attachment';
+            const attachmentUrl = attachment?.url ?? '';
+            const attachmentType = attachment?.contentType ?? 'Unknown type';
+            const attachmentSize =
+              attachment?.size !== null && attachment?.size !== undefined
+                ? `${String(attachment.size)} bytes`
+                : 'Unknown size';
+            const isExternal = attachment?.isExternalAttachment === true;
+
+            return (
+              <div key={`${key}-${attachmentId}`} className="metadata-group">
+                <div className="metadata-subheader">
+                  <span>{attachmentName}</span>
+                  <small>{attachmentId}</small>
+                </div>
+
+                <ul className="metadata-detail-list">
+                  <li>
+                    <span>Type</span>
+                    <strong>{attachmentType}</strong>
+                  </li>
+                  <li>
+                    <span>Size</span>
+                    <strong>{attachmentSize}</strong>
+                  </li>
+                  <li>
+                    <span>External</span>
+                    <strong>{isExternal ? 'Yes' : 'No'}</strong>
+                  </li>
+                  {attachmentUrl ? (
+                    <li>
+                      <span>Download</span>
+                      <strong>
+                        <a className="metadata-link" href={attachmentUrl} target="_blank" rel="noreferrer">
+                          {attachmentUrl}
+                        </a>
+                      </strong>
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (Array.isArray(value)) {
+      if (!value.length) {
+        return <div className="metadata-empty">No values.</div>;
+      }
+
+      return (
+        <ul className="metadata-sublist">
+          {value.map((item, index) => (
+            <li key={`${key}-${index}`}>{formatMetadataValue(item)}</li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      return <div className="metadata-empty">{JSON.stringify(value, null, 2)}</div>;
+    }
+
+    return <strong>{formatMetadataValue(value)}</strong>;
+  };
+
   const convert = async (event) => {
     event.preventDefault();
     setLoading(true);
@@ -20,11 +162,25 @@ export default function LivePreview() {
     try {
       const res = await fetch('/api/v1/convert', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/markdown' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/markdown',
+        },
         body: JSON.stringify({ url }),
       });
+
       const text = await res.text();
-      if (!res.ok) throw new Error(JSON.parse(text).message);
+
+      if (!res.ok) {
+        let message = 'Failed to convert article.';
+        try {
+          message = JSON.parse(text).message ?? message;
+        } catch {
+          // Keep the default message if the response is not JSON.
+        }
+        throw new Error(message);
+      }
+
       setMarkdown(text);
     } catch (err) {
       setMarkdown('');
@@ -36,10 +192,18 @@ export default function LivePreview() {
 
   const download = () => {
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }));
+    link.href = URL.createObjectURL(
+      new Blob([markdown], { type: 'text/markdown' }),
+    );
     link.download = 'article.md';
     link.click();
     URL.revokeObjectURL(link.href);
+  };
+
+  const formatValue = (value) => {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    return String(value);
   };
 
   return (
@@ -86,11 +250,20 @@ export default function LivePreview() {
                     Markdown
                   </button>
                 </div>
+
                 <div className="action-group">
-                  <button type="button" className="secondary-button" onClick={() => navigator.clipboard.writeText(markdown)}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => navigator.clipboard.writeText(markdown)}
+                  >
                     Copy
                   </button>
-                  <button type="button" className="secondary-button" onClick={download}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={download}
+                  >
                     Download .md
                   </button>
                 </div>
@@ -98,10 +271,14 @@ export default function LivePreview() {
 
               <div className="card-body scroll-panel">
                 {raw ? (
-                  <pre className="markdown-output scroll-content">{markdown}</pre>
+                  <pre className="markdown-output scroll-content">
+                    {markdown}
+                  </pre>
                 ) : (
                   <article className="rendered-markdown scroll-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {body}
+                    </ReactMarkdown>
                   </article>
                 )}
               </div>
@@ -109,15 +286,14 @@ export default function LivePreview() {
 
             <aside className="meta-panel">
               <h2>Article metadata</h2>
+
               <ul className="metadata-list">
-                {Object.entries(metadata)
-                  .filter(([key]) => key !== 'products')
-                  .map(([key, value]) => (
-                    <li key={key}>
-                      <span>{key}</span>
-                      <strong>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</strong>
-                    </li>
-                  ))}
+                {Object.entries(metadata).map(([key, value]) => (
+                  <li key={key} className={key === 'products' || key === 'attachments' ? 'metadata-item nested' : 'metadata-item'}>
+                    <span>{key}</span>
+                    {renderMetadataValue(key, value)}
+                  </li>
+                ))}
               </ul>
             </aside>
           </div>

@@ -13,6 +13,58 @@ const turndown = new TurndownService({
   bulletListMarker: '-',
 });
 
+const normalizeTableCell = (cellText: string): string =>
+  cellText.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+
+turndown.addRule('tables', {
+  filter: ['table'],
+  replacement: (_content, node) => {
+    const table = node as HTMLTableElement;
+    const rows = Array.from(table.querySelectorAll('tr'));
+
+    if (rows.length === 0) {
+      return '';
+    }
+
+    const headerCells = Array.from(rows[0].querySelectorAll('th, td')).map((cell) =>
+      normalizeTableCell(cell.textContent ?? ''),
+    );
+
+    const dataRows = rows.slice(headerCells.length > 0 ? 1 : 0);
+    const columnCount = Math.max(
+      headerCells.length,
+      ...dataRows.map((row) => Array.from(row.querySelectorAll('th, td')).length),
+    );
+
+    const padCells = (cells: string[]) => {
+      const padded = [...cells];
+      while (padded.length < columnCount) {
+        padded.push('');
+      }
+      return padded.slice(0, columnCount);
+    };
+
+    const lines: string[] = [];
+
+    if (headerCells.length > 0) {
+      lines.push(`| ${padCells(headerCells).join(' | ')} |`);
+      lines.push(`| ${padCells(Array.from({ length: columnCount }, () => '---')).join(' | ')} |`);
+    }
+
+    dataRows.forEach((row) => {
+      const cells = Array.from(row.querySelectorAll('th, td')).map((cell) =>
+        normalizeTableCell(cell.textContent ?? ''),
+      );
+
+      if (cells.some((cell) => cell.length > 0)) {
+        lines.push(`| ${padCells(cells).join(' | ')} |`);
+      }
+    });
+
+    return lines.length === 0 ? '' : `\n\n${lines.join('\n')}\n\n`;
+  },
+});
+
 turndown.addRule('codeBlocks', {
   filter: (node) =>
     node.nodeName === 'PRE' && Boolean(node.querySelector('code')),
