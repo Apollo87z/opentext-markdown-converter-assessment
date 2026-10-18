@@ -178,6 +178,8 @@ jobs:
           file: ./backend/Dockerfile.lambda
           platforms: linux/arm64
           push: true
+          provenance: false
+          sbom: false
           tags: |
             785662398792.dkr.ecr.us-east-2.amazonaws.com/opentext-markdown-converter-backend:${{ github.sha }}
             785662398792.dkr.ecr.us-east-2.amazonaws.com/opentext-markdown-converter-backend:latest
