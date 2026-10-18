@@ -1,17 +1,132 @@
-
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseMarkdownMetadata } from './utils/markdown';
 
 export default function LivePreview() {
-  const [url, setUrl] = useState('https://my.opentext.com/support/article/1986936');
+  const [url, setUrl] = useState(
+    'https://my.opentext.com/support/article/1986936'
+  );
   const [markdown, setMarkdown] = useState('');
   const [raw, setRaw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [apiKey, setApiKey] = useState('');
+  const [generatingKey, setGeneratingKey] = useState(false);
+
   const { metadata, body } = parseMarkdownMetadata(markdown);
+
+  const generateKey = async () => {
+    setGeneratingKey(true);
+    setError('');
+    setApiKey('');
+    setMarkdown('');
+
+    try {
+      const res = await fetch('/api/v1/generate-key', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      const text = await res.text();
+
+      if (!res.ok) {
+        let message = 'Failed to generate temporary access.';
+        try {
+          message = JSON.parse(text).message ?? message;
+        } catch {
+          // Keep the default message.
+        }
+        throw new Error(message);
+      }
+
+      const data = JSON.parse(text);
+
+      if (!data.apiKey) {
+        throw new Error('The server did not return an API key.');
+      }
+
+      setApiKey(data.apiKey);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to generate temporary access.'
+      );
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const convert = async (event) => {
+    event.preventDefault();
+
+    if (!apiKey) {
+      setError('Generate temporary access before converting an article.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const params = new URLSearchParams({ url });
+
+      const res = await fetch(
+        `/api/v1/articles?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+            Accept: 'text/markdown',
+          },
+        }
+      );
+
+      const text = await res.text();
+
+      if (!res.ok) {
+        let message = 'Failed to convert article.';
+
+        try {
+          message = JSON.parse(text).message ?? message;
+        } catch {
+          // Keep the default message.
+        }
+
+        if (res.status === 401 || res.status === 403) {
+          setApiKey('');
+          message = 'Temporary access expired or is invalid. Generate a new key.';
+        }
+
+        throw new Error(message);
+      }
+
+      setMarkdown(text);
+    } catch (err) {
+      setMarkdown('');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to convert article.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const download = () => {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(
+      new Blob([markdown], { type: 'text/markdown' })
+    );
+    link.download = 'article.md';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
 
   const formatMetadataValue = (value) => {
     if (value === null || value === undefined || value === '') {
@@ -19,18 +134,14 @@ export default function LivePreview() {
     }
 
     if (Array.isArray(value)) {
-      if (!value.length) {
-        return '—';
-      }
+      if (!value.length) return '—';
 
       return value
-        .map((item) => {
-          if (typeof item === 'object' && item !== null) {
-            return JSON.stringify(item);
-          }
-
-          return String(item);
-        })
+        .map((item) =>
+          typeof item === 'object' && item !== null
+            ? JSON.stringify(item)
+            : String(item)
+        )
         .join(', ');
     }
 
@@ -52,7 +163,9 @@ export default function LivePreview() {
           {value.map((product, index) => {
             const productId = product?.id ?? `product-${index + 1}`;
             const productName = product?.name ?? 'Unnamed product';
-            const versions = Array.isArray(product?.versions) ? product.versions : [];
+            const versions = Array.isArray(product?.versions)
+              ? product.versions
+              : [];
 
             return (
               <div key={`${key}-${productId}`} className="metadata-group">
@@ -64,7 +177,9 @@ export default function LivePreview() {
                 {versions.length ? (
                   <ul className="metadata-sublist">
                     {versions.map((version, versionIndex) => (
-                      <li key={`${productId}-version-${versionIndex}`}>{formatMetadataValue(version)}</li>
+                      <li key={`${productId}-version-${versionIndex}`}>
+                        {formatMetadataValue(version)}
+                      </li>
                     ))}
                   </ul>
                 ) : (
@@ -115,16 +230,21 @@ export default function LivePreview() {
                     <span>External</span>
                     <strong>{isExternal ? 'Yes' : 'No'}</strong>
                   </li>
-                  {attachmentUrl ? (
+                  {attachmentUrl && (
                     <li>
                       <span>Download</span>
                       <strong>
-                        <a className="metadata-link" href={attachmentUrl} target="_blank" rel="noreferrer">
+                        <a
+                          className="metadata-link"
+                          href={attachmentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           {attachmentUrl}
                         </a>
                       </strong>
                     </li>
-                  ) : null}
+                  )}
                 </ul>
               </div>
             );
@@ -148,69 +268,14 @@ export default function LivePreview() {
     }
 
     if (typeof value === 'object' && value !== null) {
-      return <div className="metadata-empty">{JSON.stringify(value, null, 2)}</div>;
+      return (
+        <div className="metadata-empty">
+          {JSON.stringify(value, null, 2)}
+        </div>
+      );
     }
 
     return <strong>{formatMetadataValue(value)}</strong>;
-  };
-
-
-  const convert = async (event) => {
-    event.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const params = new URLSearchParams({ url });
-
-      const res = await fetch(`/api/v1/articles?${params.toString()}`, {
-        method: 'GET',
-        headers: {
-          Accept: 'text/markdown',
-        },
-      });
-
-      const text = await res.text();
-
-      if (!res.ok) {
-        let message = 'Failed to convert article.';
-
-        try {
-          message = JSON.parse(text).message ?? message;
-        } catch {
-          // Keep the default message if the response is not JSON.
-        }
-
-        throw new Error(message);
-      }
-
-      setMarkdown(text);
-    } catch (err) {
-      setMarkdown('');
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to convert article.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const download = () => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(
-      new Blob([markdown], { type: 'text/markdown' }),
-    );
-    link.download = 'article.md';
-    link.click();
-    URL.revokeObjectURL(link.href);
-  };
-
-  const formatValue = (value) => {
-    if (value === null || value === undefined) return '—';
-    if (typeof value === 'object') return JSON.stringify(value, null, 2);
-    return String(value);
   };
 
   return (
@@ -219,6 +284,29 @@ export default function LivePreview() {
         <section className="page-header">
           <h1>Live Preview</h1>
         </section>
+
+        <div className="converter-form">
+          <div className="input-row">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={generateKey}
+              disabled={generatingKey || loading}
+            >
+              {generatingKey
+                ? 'Generating access…'
+                : apiKey
+                  ? 'Generate New Access'
+                  : 'Get Temporary Access'}
+            </button>
+
+            <span>
+              {apiKey
+                ? 'Temporary access is ready.'
+                : 'Generate temporary access to enable conversion.'}
+            </span>
+          </div>
+        </div>
 
         <form className="converter-form" onSubmit={convert}>
           <div className="input-row">
@@ -229,7 +317,12 @@ export default function LivePreview() {
               onChange={(e) => setUrl(e.target.value)}
               required
             />
-            <button className="primary-button" disabled={loading}>
+
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={!apiKey || loading || generatingKey}
+            >
               {loading ? 'Converting…' : 'Convert'}
             </button>
           </div>
@@ -296,7 +389,14 @@ export default function LivePreview() {
 
               <ul className="metadata-list">
                 {Object.entries(metadata).map(([key, value]) => (
-                  <li key={key} className={key === 'products' || key === 'attachments' ? 'metadata-item nested' : 'metadata-item'}>
+                  <li
+                    key={key}
+                    className={
+                      key === 'products' || key === 'attachments'
+                        ? 'metadata-item nested'
+                        : 'metadata-item'
+                    }
+                  >
                     <span>{key}</span>
                     {renderMetadataValue(key, value)}
                   </li>
