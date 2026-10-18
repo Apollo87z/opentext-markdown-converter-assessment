@@ -1,11 +1,10 @@
-import { randomBytes, createHash } from 'node:crypto';
-import { Router } from 'express';
-import { asyncHandler, HttpError } from '../middleware/errorHandler.js';
 
-const router= Router();
-router.post('/generate-key', (_req, res) => {
-  return res.status(201).json({
-    apiKey: 'mdc_live_sogbnSBQCQw8IULWgTPmbZARVgAHj7g_WUlwAxCSpIs',
-  });
-});
+import { Router } from 'express';
+import { asyncHandler } from '../middleware/errorHandler.js';
+import { generateApiKey } from '../controlers/security_controller';
+
+const router = Router();
+
+router.post('/generate-key', asyncHandler(generateApiKey));
+
 export default router;
