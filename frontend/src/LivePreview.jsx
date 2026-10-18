@@ -62,6 +62,35 @@ function formatTimeAgo(value, now = Date.now()) {
   return `${years} year${years === 1 ? '' : 's'} ago`;
 }
 
+function formatCacheAge(seconds) {
+  if (seconds < 60) return 'just now';
+
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  }
+
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  }
+
+  const days = Math.floor(seconds / 86400);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function getCloudFrontAge(res) {
+  const ageHeader = res.headers.get('age');
+
+  if (ageHeader === null || !/^\d+$/.test(ageHeader.trim())) {
+    return null;
+  }
+
+  const age = Number(ageHeader);
+
+  return Number.isSafeInteger(age) ? age : null;
+}
+
 export default function LivePreview() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [markdown, setMarkdown] = useState('');
@@ -72,7 +101,8 @@ export default function LivePreview() {
   const [apiKey, setApiKey] = useState('');
   const [generatingKey, setGeneratingKey] = useState(false);
   const [notice, setNotice] = useState('');
-  const [fetchedAt, setFetchedAt] = useState('');
+  const [cacheAge, setCacheAge] = useState(null);
+  const [cacheAgeReceivedAt, setCacheAgeReceivedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -85,13 +115,17 @@ export default function LivePreview() {
 
   const { metadata, body } = parseMarkdownMetadata(markdown);
 
+  const updateCacheAge = (res) => {
+    setCacheAge(getCloudFrontAge(res));
+    setCacheAgeReceivedAt(Date.now());
+  };
+
   const generateKey = async () => {
     setGeneratingKey(true);
     setError('');
     setNotice('');
     setApiKey('');
 
-    // Keep the current article visible when generating another key.
     try {
       const res = await fetch('/api/v1/generate-key', {
         method: 'POST',
@@ -187,10 +221,9 @@ export default function LivePreview() {
         throw new Error(message);
       }
 
-      // Commit the new article only after a successful response.
       setMarkdown(text);
       setConvertedUrl(requestedUrl);
-      setFetchedAt(res.headers.get('x-article-fetched-at') || '');
+      updateCacheAge(res);
       setRaw(false);
 
       setNotice(
@@ -199,7 +232,6 @@ export default function LivePreview() {
           : 'Article converted successfully.',
       );
     } catch (err) {
-      // Never erase the previous successful article on failure.
       setError(
         err instanceof Error
           ? err.message
@@ -216,8 +248,6 @@ export default function LivePreview() {
   };
 
   const refreshArticle = async () => {
-    // Refresh the article currently displayed, not an unconverted URL
-    // that may have been entered into the input.
     if (!convertedUrl) return;
 
     const currentInput = url;
@@ -226,12 +256,14 @@ export default function LivePreview() {
     try {
       await fetchArticleForUrl(convertedUrl, true);
     } finally {
-      // Keep the user's typed URL so they can continue editing it.
       setUrl(currentInput);
     }
   };
 
-  const fetchArticleForUrl = async (requestedUrl, forceRefresh = false) => {
+  const fetchArticleForUrl = async (
+    requestedUrl,
+    forceRefresh = false,
+  ) => {
     if (!apiKey) {
       setError('Generate temporary access before converting an article.');
       return;
@@ -242,7 +274,9 @@ export default function LivePreview() {
     setNotice('');
 
     try {
-      const params = new URLSearchParams({ url: requestedUrl });
+      const params = new URLSearchParams({
+        url: requestedUrl,
+      });
 
       if (forceRefresh) {
         params.set('forceRefresh', 'true');
@@ -281,11 +315,10 @@ export default function LivePreview() {
 
       setMarkdown(text);
       setConvertedUrl(requestedUrl);
-      setFetchedAt(res.headers.get('x-article-fetched-at') || '');
+      updateCacheAge(res);
       setRaw(false);
       setNotice('Article refreshed successfully.');
     } catch (err) {
-      // Preserve the previous content and timestamp.
       setError(
         err instanceof Error
           ? err.message
@@ -297,7 +330,6 @@ export default function LivePreview() {
   };
 
   const handleUrlChange = (event) => {
-    // Editing the input must not clear the last converted article.
     setUrl(event.target.value);
     setError('');
     setNotice('');
@@ -334,7 +366,9 @@ export default function LivePreview() {
   };
 
   const formatMetadataValue = (value) => {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') {
+      return '—';
+    }
 
     if (Array.isArray(value)) {
       if (!value.length) return '—';
@@ -358,13 +392,17 @@ export default function LivePreview() {
   const renderMetadataValue = (key, value) => {
     if (key === 'createdAt' || key === 'updatedAt') {
       return (
-        <strong className="metadata-date">{formatDate(value)}</strong>
+        <strong className="metadata-date">
+          {formatDate(value)}
+        </strong>
       );
     }
 
     if (key === 'products') {
       if (!Array.isArray(value) || !value.length) {
-        return <div className="metadata-empty">No products available.</div>;
+        return (
+          <div className="metadata-empty">No products available.</div>
+        );
       }
 
       return (
@@ -377,7 +415,10 @@ export default function LivePreview() {
               : [];
 
             return (
-              <div key={`${key}-${productId}`} className="metadata-group">
+              <div
+                key={`${key}-${productId}`}
+                className="metadata-group"
+              >
                 <div className="metadata-subheader">
                   <span>{productName}</span>
                   <small>{productId}</small>
@@ -392,7 +433,9 @@ export default function LivePreview() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="metadata-empty">No versions listed.</div>
+                  <div className="metadata-empty">
+                    No versions listed.
+                  </div>
                 )}
               </div>
             );
@@ -404,7 +447,9 @@ export default function LivePreview() {
     if (key === 'attachments') {
       if (!Array.isArray(value) || !value.length) {
         return (
-          <div className="metadata-empty">No attachments available.</div>
+          <div className="metadata-empty">
+            No attachments available.
+          </div>
         );
       }
 
@@ -419,10 +464,12 @@ export default function LivePreview() {
             const attachmentType =
               attachment?.contentType ?? 'Unknown type';
             const attachmentSize =
-              attachment?.size !== null && attachment?.size !== undefined
+              attachment?.size !== null &&
+              attachment?.size !== undefined
                 ? `${String(attachment.size)} bytes`
                 : 'Unknown size';
-            const isExternal = attachment?.isExternalAttachment === true;
+            const isExternal =
+              attachment?.isExternalAttachment === true;
 
             return (
               <div
@@ -478,7 +525,9 @@ export default function LivePreview() {
       return (
         <ul className="metadata-sublist">
           {value.map((item, index) => (
-            <li key={`${key}-${index}`}>{formatMetadataValue(item)}</li>
+            <li key={`${key}-${index}`}>
+              {formatMetadataValue(item)}
+            </li>
           ))}
         </ul>
       );
@@ -510,6 +559,12 @@ export default function LivePreview() {
     : generatingKey
       ? 'Generating access'
       : 'Access required';
+
+  const displayedCacheAge =
+    cacheAge !== null && cacheAgeReceivedAt !== null
+      ? cacheAge +
+        Math.floor((now - cacheAgeReceivedAt) / 1000)
+      : null;
 
   return (
     <main className="page-shell live-preview-page">
@@ -554,7 +609,9 @@ export default function LivePreview() {
               />
               <div>
                 <strong>
-                  {apiKey ? 'Temporary access ready' : 'Access required'}
+                  {apiKey
+                    ? 'Temporary access ready'
+                    : 'Access required'}
                 </strong>
                 <span>
                   {apiKey
@@ -590,7 +647,9 @@ export default function LivePreview() {
 
             <div className="input-row preview-input-row">
               <div className="url-input-wrap">
-                <span className="url-input-icon" aria-hidden="true">↗</span>
+                <span className="url-input-icon" aria-hidden="true">
+                  ↗
+                </span>
                 <input
                   id="article-url"
                   className="text-input"
@@ -614,20 +673,24 @@ export default function LivePreview() {
                     Converting…
                   </>
                 ) : (
-                  <>Convert article <span aria-hidden="true"> →</span></>
+                  <>
+                    Convert article <span aria-hidden="true"> →</span>
+                  </>
                 )}
               </button>
             </div>
 
             <p className="field-hint">
               Enter the full URL of the support article you want to convert.
-              
             </p>
           </form>
         </section>
 
         {error && (
-          <div className="preview-feedback preview-feedback-error" role="alert">
+          <div
+            className="preview-feedback preview-feedback-error"
+            role="alert"
+          >
             <span className="feedback-icon" aria-hidden="true">!</span>
             <span>{error}</span>
             <button
@@ -664,7 +727,9 @@ export default function LivePreview() {
             <span className="loading-spinner" />
             <div>
               <strong>
-                {markdown ? 'Updating article' : 'Converting your article'}
+                {markdown
+                  ? 'Updating article'
+                  : 'Converting your article'}
               </strong>
               <p>
                 {markdown
@@ -712,26 +777,23 @@ export default function LivePreview() {
 
         {markdown && (
           <section className="preview-results">
-            {/* Last refreshed appears before section 02. */}
             <div className="access-row article-refresh-row">
               <div className="access-indicator">
                 <span className="access-indicator-dot is-ready" />
                 <div>
-                  <strong>Last refreshed {formatTimeAgo(fetchedAt, now)}</strong>
-                  <span>
-                    {fetchedAt
-                      ? formatDate(fetchedAt)
-                      : 'The server did not provide a refresh timestamp.'}
-                  </span>
+                  <strong>
+                    Last refreshed{' '}
+                    {displayedCacheAge === null
+                      ? '—'
+                      : formatCacheAge(displayedCacheAge)}
+                  </strong>
                 </div>
               </div>
-
               <button
                 type="button"
                 className="secondary-button access-button"
                 onClick={refreshArticle}
-                disabled={!apiKey || loading || generatingKey}
-                title="Fetch the latest version of the currently displayed article"
+                disabled={loading || generatingKey}
               >
                 {loading ? (
                   <>
@@ -762,7 +824,8 @@ export default function LivePreview() {
                 </span>
                 {attachmentCount > 0 && (
                   <span className="result-badge">
-                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
+                    {attachmentCount} attachment
+                    {attachmentCount === 1 ? '' : 's'}
                   </span>
                 )}
               </div>
@@ -820,7 +883,9 @@ export default function LivePreview() {
 
                 <div className="card-body scroll-panel preview-card-body">
                   {raw ? (
-                    <pre className="markdown-output scroll-content">{markdown}</pre>
+                    <pre className="markdown-output scroll-content">
+                      {markdown}
+                    </pre>
                   ) : (
                     <article className="rendered-markdown scroll-content">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -831,7 +896,9 @@ export default function LivePreview() {
                 </div>
 
                 <footer className="preview-card-footer">
-                  <span>{raw ? 'Raw Markdown source' : 'Rendered Markdown'}</span>
+                  <span>
+                    {raw ? 'Raw Markdown source' : 'Rendered Markdown'}
+                  </span>
                   <span>{markdown.length.toLocaleString()} characters</span>
                 </footer>
               </section>
@@ -842,7 +909,9 @@ export default function LivePreview() {
                     <span className="metadata-eyebrow">ARTICLE DETAILS</span>
                     <h2>Metadata</h2>
                   </div>
-                  <span className="metadata-count">{metadataEntries.length}</span>
+                  <span className="metadata-count">
+                    {metadataEntries.length}
+                  </span>
                 </div>
 
                 {metadataEntries.length ? (
@@ -862,7 +931,9 @@ export default function LivePreview() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="metadata-empty">No article metadata is available.</p>
+                  <p className="metadata-empty">
+                    No article metadata is available.
+                  </p>
                 )}
               </aside>
             </div>

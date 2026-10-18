@@ -1,3 +1,4 @@
+
 import { useMemo, useState } from 'react';
 
 const API_BASE_URL = 'https://dizrmwyelhihs.cloudfront.net';
@@ -72,7 +73,11 @@ function CodeExamplePanel({ examples, id }) {
   return (
     <div className="docs-code-panel">
       <div className="docs-code-toolbar">
-        <div className="docs-code-tabs" role="tablist" aria-label="Code examples">
+        <div
+          className="docs-code-tabs"
+          role="tablist"
+          aria-label="Code examples"
+        >
           {examples.map((example) => (
             <button
               key={example.language}
@@ -172,8 +177,26 @@ export default function Docs() {
     {
       language: 'bash-json',
       label: 'cURL · JSON',
+      code: `curl -i -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: application/json"`,
+    },
+    {
+      language: 'bash-cache-age',
+      label: 'cURL · Cache Age',
+      code: `curl -sS -D - -o /dev/null -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: application/json" \\
+  | grep -i "^age:"`,
+    },
+    {
+      language: 'bash-force-refresh',
+      label: 'Force Refresh',
       code: `curl -G "${API_BASE_URL}/api/v1/articles" \\
   --data-urlencode "url=${ARTICLE_URL}" \\
+  --data-urlencode "forceRefresh=true" \\
   -H "x-api-key: ${API_KEY}" \\
   -H "Accept: application/json"`,
     },
@@ -182,9 +205,46 @@ export default function Docs() {
       label: 'JavaScript',
       code: `const articleUrl = '${ARTICLE_URL}';
 
+const params = new URLSearchParams({
+  url: articleUrl,
+});
+
 const response = await fetch(
-  '${API_BASE_URL}/api/v1/articles?url=' +
-    encodeURIComponent(articleUrl),
+  '${API_BASE_URL}/api/v1/articles?' + params,
+  {
+    headers: {
+      'x-api-key': '${API_KEY}',
+      Accept: 'application/json',
+    },
+  },
+);
+
+if (!response.ok) {
+  throw new Error('Request failed: ' + response.status);
+}
+
+const age = response.headers.get('Age');
+
+console.log(
+  age === null
+    ? 'Cache age is unavailable'
+    : 'Article cached for ' + age + ' seconds',
+);
+
+const data = await response.json();
+console.log(data.article.title);
+console.log(data.markdown);`,
+    },
+    {
+      language: 'javascript-force-refresh',
+      label: 'JavaScript · Force Refresh',
+      code: `const params = new URLSearchParams({
+  url: '${ARTICLE_URL}',
+  forceRefresh: 'true',
+});
+
+const response = await fetch(
+  '${API_BASE_URL}/api/v1/articles?' + params,
   {
     headers: {
       'x-api-key': '${API_KEY}',
@@ -216,6 +276,13 @@ response = requests.get(
     timeout=30,
 )
 response.raise_for_status()
+
+age = response.headers.get('Age')
+if age is not None:
+    print(f'Article cached for {age} seconds')
+else:
+    print('Cache age is unavailable')
+
 data = response.json()
 print(data['article']['title'])
 print(data['markdown'])`,
@@ -398,7 +465,9 @@ print(response.json()['apiKey'])`,
                   ].map(([method, id, path, description]) => (
                     <tr key={id}>
                       <td>
-                        <span className={`docs-method docs-method-${method.toLowerCase()}`}>
+                        <span
+                          className={`docs-method docs-method-${method.toLowerCase()}`}
+                        >
                           {method}
                         </span>
                       </td>
@@ -443,7 +512,9 @@ print(response.json()['apiKey'])`,
                 <h2>GET /api/v1/health</h2>
               </div>
             </div>
-            <p>Returns the application status as JSON. No API key is required.</p>
+            <p>
+              Returns the application status as JSON. No API key is required.
+            </p>
             <CodeExamplePanel id="health" examples={healthExamples} />
           </section>
 
@@ -462,13 +533,34 @@ print(response.json()['apiKey'])`,
             </p>
 
             <ul>
-              <li><strong>Authentication:</strong> <code>x-api-key</code> header</li>
-              <li><strong>Query parameter:</strong> <code>url</code> — an OpenText support article URL</li>
-              <li><strong>Markdown:</strong> <code>Accept: text/markdown</code></li>
-              <li><strong>JSON:</strong> <code>Accept: application/json</code></li>
-              <li><strong>Default:</strong> Markdown when the header is omitted or accepts <code>*/*</code>.</li>
-              <li><strong>Unsupported format:</strong> HTTP <code>406</code>.</li>
-              <li><strong>Example article:</strong> <code>{ARTICLE_URL}</code></li>
+              <li>
+                <strong>Authentication:</strong> <code>x-api-key</code> header
+              </li>
+              <li>
+                <strong>Required query parameter:</strong> <code>url</code> — an
+                OpenText support article URL
+              </li>
+              <li>
+                <strong>Optional query parameter:</strong>{' '}
+                <code>forceRefresh=true</code> — requests a fresh article and
+                triggers the backend cache-invalidation workflow.
+              </li>
+              <li>
+                <strong>Markdown:</strong> <code>Accept: text/markdown</code>
+              </li>
+              <li>
+                <strong>JSON:</strong> <code>Accept: application/json</code>
+              </li>
+              <li>
+                <strong>Default:</strong> Markdown when the header is omitted
+                or accepts <code>*/*</code>.
+              </li>
+              <li>
+                <strong>Unsupported format:</strong> HTTP <code>406</code>.
+              </li>
+              <li>
+                <strong>Example article:</strong> <code>{ARTICLE_URL}</code>
+              </li>
             </ul>
 
             <h3>Response formats</h3>
@@ -479,7 +571,147 @@ print(response.json()['apiKey'])`,
               converted content.
             </p>
 
-            <CodeExamplePanel id="articles" examples={articleExamples} />
+            <h3>Cache behavior</h3>
+            <p>
+              Article responses are cached by CloudFront to reduce repeated
+              upstream requests and improve response times.
+            </p>
+
+            <ul>
+              <li>
+                <strong>Normal request:</strong> A cached response can be
+                returned when available. The configured shared-cache lifetime
+                is 24 hours.
+              </li>
+              <li>
+                <strong>Cache age:</strong> Read the CloudFront <code>Age</code>{' '}
+                response header to see how many seconds the response has been
+                cached. For example, <code>Age: 3600</code> means the cached
+                response is approximately one hour old. This is cache age, not
+                the article's publication or update time.
+              </li>
+              <li>
+                <strong>Force refresh:</strong> Add <code>forceRefresh=true</code>{' '}
+                to request a fresh article. The backend runs its refresh and
+                cache-invalidation workflow.
+              </li>
+              <li>
+                <strong>After refreshing:</strong> The next normal request may
+                initially miss the cache while CloudFront retrieves and caches
+                the refreshed response.
+              </li>
+              <li>
+                <strong>Normal response header:</strong>{' '}
+                <code>Cache-Control: public, max-age=0, s-maxage=86400</code>.
+              </li>
+              <li>
+                <strong>Force-refresh response header:</strong>{' '}
+                <code>Cache-Control: no-store</code>.
+              </li>
+            </ul>
+
+            <h3>Read the cache age</h3>
+            <p>
+              Use the <code>Age</code> response header to check the age of a
+              cached response. It may be absent on a cache miss. In browsers,
+              the API must expose the header through CORS using{' '}
+              <code>Access-Control-Expose-Headers: Age</code>.
+            </p>
+
+            <CodeExamplePanel
+              id="articles"
+              examples={[
+                articleExamples[0],
+                articleExamples[1],
+                articleExamples[2],
+                articleExamples[3],
+                articleExamples[4],
+                articleExamples[5],
+                articleExamples[6],
+                articleExamples[7],
+              ]}
+            />
+
+            <h3>Cache age examples</h3>
+            <p>
+              These examples read the response header. Replace{' '}
+              <code>YOUR_API_KEY</code> with your API key.
+            </p>
+
+            <CodeExamplePanel
+              id="cache-age"
+              examples={[
+                {
+                  language: 'bash',
+                  label: 'cURL',
+                  code: `curl -sS -D - -o /dev/null -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: application/json" \\
+  | grep -i "^age:"`,
+                },
+                {
+                  language: 'javascript',
+                  label: 'JavaScript',
+                  code: `const response = await fetch(
+  '${API_BASE_URL}/api/v1/articles?url=' +
+    encodeURIComponent('${ARTICLE_URL}'),
+  {
+    headers: {
+      'x-api-key': '${API_KEY}',
+      Accept: 'application/json',
+    },
+  },
+);
+
+const age = response.headers.get('Age');
+
+console.log(
+  age === null
+    ? 'Cache age is unavailable'
+    : 'Article cached for ' + age + ' seconds',
+);`,
+                },
+                {
+                  language: 'python',
+                  label: 'Python',
+                  code: `import requests
+
+response = requests.get(
+    '${API_BASE_URL}/api/v1/articles',
+    params={'url': '${ARTICLE_URL}'},
+    headers={
+        'x-api-key': '${API_KEY}',
+        'Accept': 'application/json',
+    },
+    timeout=30,
+)
+response.raise_for_status()
+
+age = response.headers.get('Age')
+print(
+    f'Article cached for {age} seconds'
+    if age is not None
+    else 'Cache age is unavailable'
+)`,
+                },
+                {
+                  language: 'text',
+                  label: 'Example Header',
+                  code: `HTTP/2 200
+content-type: application/json
+cache-control: public, max-age=0, s-maxage=86400
+age: 3600`,
+                },
+              ]}
+            />
+
+            <p>
+              Use force refresh when an article may have changed. Normal
+              requests are recommended for routine reads. Refreshing cannot
+              guarantee that changes are immediately available from the
+              upstream OpenText service.
+            </p>
           </section>
 
           <section id="generate-key" className="docs-section">
