@@ -1,3 +1,4 @@
+
 import { randomBytes, createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 import {
@@ -12,19 +13,11 @@ const kvsClient = new CloudFrontKeyValueStoreClient({
   region: process.env.AWS_REGION || 'us-east-1',
 });
 
-export async function generateApiKey(req: Request, res: Response) {
+export async function generateApiKey(_req: Request, res: Response) {
   const kvsArn = process.env.KVS_ARN;
-  const clientName = req.body?.clientName;
 
   if (!kvsArn) {
     return res.status(500).json({ error: 'Key store is not configured' });
-  }
-
-  if (
-    typeof clientName !== 'string' ||
-    !/^[a-zA-Z0-9_-]{1,64}$/.test(clientName)
-  ) {
-    return res.status(400).json({ error: 'Invalid clientName' });
   }
 
   const apiKey = `mdc_live_${randomBytes(32).toString('base64url')}`;
@@ -33,7 +26,6 @@ export async function generateApiKey(req: Request, res: Response) {
   try {
     let registered = false;
 
-    // Retry if another update changes the KVS ETag concurrently.
     for (let attempt = 0; attempt < 3; attempt++) {
       const store = await kvsClient.send(
         new DescribeKeyValueStoreCommand({ KvsARN: kvsArn }),
@@ -50,7 +42,6 @@ export async function generateApiKey(req: Request, res: Response) {
             IfMatch: store.ETag,
             Key: keyHash,
             Value: JSON.stringify({
-              client: clientName,
               created: new Date().toISOString(),
             }),
           }),
@@ -72,10 +63,7 @@ export async function generateApiKey(req: Request, res: Response) {
       throw new Error('Unable to register API key');
     }
 
-    return res.status(201).json({
-      client: clientName,
-      apiKey,
-    });
+    return res.status(201).json({ apiKey });
   } catch (error) {
     console.error('API key registration failed', {
       errorName: error instanceof Error ? error.name : 'UnknownError',
