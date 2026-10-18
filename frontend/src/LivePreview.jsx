@@ -1,25 +1,48 @@
+
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseMarkdownMetadata } from './utils/markdown';
 
+const DEFAULT_URL =
+  'https://my.opentext.com/support/article/1986936';
+
+function formatDate(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).format(date);
+}
+
 export default function LivePreview() {
-  const [url, setUrl] = useState(
-    'https://my.opentext.com/support/article/1986936'
-  );
+  const [url, setUrl] = useState(DEFAULT_URL);
   const [markdown, setMarkdown] = useState('');
   const [raw, setRaw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
   const [apiKey, setApiKey] = useState('');
   const [generatingKey, setGeneratingKey] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const { metadata, body } = parseMarkdownMetadata(markdown);
 
   const generateKey = async () => {
     setGeneratingKey(true);
     setError('');
+    setNotice('');
     setApiKey('');
     setMarkdown('');
 
@@ -32,24 +55,26 @@ export default function LivePreview() {
       });
 
       const text = await res.text();
+      let data = {};
 
-      if (!res.ok) {
-        let message = 'Failed to generate temporary access.';
-        try {
-          message = JSON.parse(text).message ?? message;
-        } catch {
-          // Keep the default message.
-        }
-        throw new Error(message);
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Handle non-JSON responses below.
       }
 
-      const data = JSON.parse(text);
+      if (!res.ok) {
+        throw new Error(
+          data.message ?? 'Failed to generate temporary access.'
+        );
+      }
 
       if (!data.apiKey) {
         throw new Error('The server did not return an API key.');
       }
 
       setApiKey(data.apiKey);
+      setNotice('Temporary access is ready.');
     } catch (err) {
       setError(
         err instanceof Error
@@ -71,6 +96,7 @@ export default function LivePreview() {
 
     setLoading(true);
     setError('');
+    setNotice('');
 
     try {
       const params = new URLSearchParams({ url });
@@ -99,13 +125,16 @@ export default function LivePreview() {
 
         if (res.status === 401 || res.status === 403) {
           setApiKey('');
-          message = 'Temporary access expired or is invalid. Generate a new key.';
+          message =
+            'Temporary access expired or is invalid. Generate a new key.';
         }
 
         throw new Error(message);
       }
 
       setMarkdown(text);
+      setRaw(false);
+      setNotice('Article converted successfully.');
     } catch (err) {
       setMarkdown('');
       setError(
@@ -118,14 +147,34 @@ export default function LivePreview() {
     }
   };
 
-  const download = () => {
+  const copyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setNotice('Markdown copied to clipboard.');
+      setError('');
+    } catch {
+      setError('Unable to copy. Check your browser clipboard permissions.');
+    }
+  };
+
+  const downloadMarkdown = () => {
+    const blob = new Blob([markdown], {
+      type: 'text/markdown;charset=utf-8',
+    });
+
+    const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(
-      new Blob([markdown], { type: 'text/markdown' })
-    );
+
+    link.href = objectUrl;
     link.download = 'article.md';
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(link.href);
+    link.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+    setNotice('Download started: article.md');
+    setError('');
   };
 
   const formatMetadataValue = (value) => {
@@ -153,9 +202,21 @@ export default function LivePreview() {
   };
 
   const renderMetadataValue = (key, value) => {
+    if (key === 'createdAt' || key === 'updatedAt') {
+      return (
+        <strong className="metadata-date">
+          {formatDate(value)}
+        </strong>
+      );
+    }
+
     if (key === 'products') {
       if (!Array.isArray(value) || !value.length) {
-        return <div className="metadata-empty">No products available.</div>;
+        return (
+          <div className="metadata-empty">
+            No products available.
+          </div>
+        );
       }
 
       return (
@@ -168,7 +229,10 @@ export default function LivePreview() {
               : [];
 
             return (
-              <div key={`${key}-${productId}`} className="metadata-group">
+              <div
+                key={`${key}-${productId}`}
+                className="metadata-group"
+              >
                 <div className="metadata-subheader">
                   <span>{productName}</span>
                   <small>{productId}</small>
@@ -183,7 +247,9 @@ export default function LivePreview() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="metadata-empty">No versions listed.</div>
+                  <div className="metadata-empty">
+                    No versions listed.
+                  </div>
                 )}
               </div>
             );
@@ -194,24 +260,36 @@ export default function LivePreview() {
 
     if (key === 'attachments') {
       if (!Array.isArray(value) || !value.length) {
-        return <div className="metadata-empty">No attachments available.</div>;
+        return (
+          <div className="metadata-empty">
+            No attachments available.
+          </div>
+        );
       }
 
       return (
         <div className="metadata-subsection">
           {value.map((attachment, index) => {
-            const attachmentId = attachment?.id ?? `attachment-${index + 1}`;
-            const attachmentName = attachment?.name ?? 'Unnamed attachment';
+            const attachmentId =
+              attachment?.id ?? `attachment-${index + 1}`;
+            const attachmentName =
+              attachment?.name ?? 'Unnamed attachment';
             const attachmentUrl = attachment?.url ?? '';
-            const attachmentType = attachment?.contentType ?? 'Unknown type';
+            const attachmentType =
+              attachment?.contentType ?? 'Unknown type';
             const attachmentSize =
-              attachment?.size !== null && attachment?.size !== undefined
+              attachment?.size !== null &&
+              attachment?.size !== undefined
                 ? `${String(attachment.size)} bytes`
                 : 'Unknown size';
-            const isExternal = attachment?.isExternalAttachment === true;
+            const isExternal =
+              attachment?.isExternalAttachment === true;
 
             return (
-              <div key={`${key}-${attachmentId}`} className="metadata-group">
+              <div
+                key={`${key}-${attachmentId}`}
+                className="metadata-group"
+              >
                 <div className="metadata-subheader">
                   <span>{attachmentName}</span>
                   <small>{attachmentId}</small>
@@ -238,9 +316,9 @@ export default function LivePreview() {
                           className="metadata-link"
                           href={attachmentUrl}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                         >
-                          {attachmentUrl}
+                          Open attachment ↗
                         </a>
                       </strong>
                     </li>
@@ -261,7 +339,9 @@ export default function LivePreview() {
       return (
         <ul className="metadata-sublist">
           {value.map((item, index) => (
-            <li key={`${key}-${index}`}>{formatMetadataValue(item)}</li>
+            <li key={`${key}-${index}`}>
+              {formatMetadataValue(item)}
+            </li>
           ))}
         </ul>
       );
@@ -269,141 +349,378 @@ export default function LivePreview() {
 
     if (typeof value === 'object' && value !== null) {
       return (
-        <div className="metadata-empty">
+        <pre className="metadata-object">
           {JSON.stringify(value, null, 2)}
-        </div>
+        </pre>
       );
     }
 
-    return <strong>{formatMetadataValue(value)}</strong>;
+    return (
+      <strong className="metadata-value">
+        {formatMetadataValue(value)}
+      </strong>
+    );
   };
 
-  return (
-    <main className="page-shell">
-      <div className="container">
-        <section className="page-header">
-          <h1>Live Preview</h1>
-        </section>
+  const metadataEntries = Object.entries(metadata);
 
-        <div className="converter-form">
-          <div className="input-row">
+  const attachmentCount = Array.isArray(metadata.attachments)
+    ? metadata.attachments.length
+    : 0;
+
+  const accessStatus = apiKey
+    ? 'Ready to convert'
+    : generatingKey
+      ? 'Generating access'
+      : 'Access required';
+
+  return (
+    <main className="page-shell live-preview-page">
+      <div className="container">
+        <header className="preview-hero">
+          <div>
+            <div className="preview-eyebrow">
+              <span className="preview-eyebrow-dot" />
+              MARKDOWN CONVERTER
+            </div>
+
+            <h1>Live Preview</h1>
+
+            <p className="preview-subtitle">
+              Convert an OpenText support article into Markdown.
+              Preview the content, inspect its metadata, or download
+              the result as a file.
+            </p>
+          </div>
+
+          <div
+            className={`preview-hero-badge ${
+              apiKey ? 'is-ready' : 'is-required'
+            }`}
+          >
+            <span className="preview-hero-badge-dot" />
+            {accessStatus}
+          </div>
+        </header>
+
+        <section className="converter-panel">
+          <div className="converter-panel-heading">
+            <div className="converter-step">01</div>
+            <div>
+              <h2>Prepare your conversion</h2>
+              <p>
+                Generate temporary access, then enter an article URL.
+              </p>
+            </div>
+          </div>
+
+          <div className="access-row">
+            <div className="access-indicator">
+              <span
+                className={`access-indicator-dot ${
+                  apiKey ? 'is-ready' : ''
+                }`}
+              />
+              <div>
+                <strong>
+                  {apiKey ? 'Temporary access ready' : 'Access required'}
+                </strong>
+                <span>
+                  {apiKey
+                    ? 'You can convert an article.'
+                    : 'Generate temporary access to continue.'}
+                </span>
+              </div>
+            </div>
+
             <button
               type="button"
-              className="secondary-button"
+              className="secondary-button access-button"
               onClick={generateKey}
               disabled={generatingKey || loading}
             >
-              {generatingKey
-                ? 'Generating access…'
-                : apiKey
-                  ? 'Generate New Access'
-                  : 'Get Temporary Access'}
+              {generatingKey ? (
+                <>
+                  <span className="button-spinner" />
+                  Generating…
+                </>
+              ) : apiKey ? (
+                '↻ Generate new access'
+              ) : (
+                '+ Get temporary access'
+              )}
             </button>
-
-            <span>
-              {apiKey
-                ? 'Temporary access is ready.'
-                : 'Generate temporary access to enable conversion.'}
-            </span>
           </div>
-        </div>
 
-        <form className="converter-form" onSubmit={convert}>
-          <div className="input-row">
-            <input
-              className="text-input"
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-            />
+          <form className="converter-form" onSubmit={convert}>
+            <label className="field-label" htmlFor="article-url">
+              Article URL
+            </label>
 
+            <div className="input-row preview-input-row">
+              <div className="url-input-wrap">
+                <span className="url-input-icon" aria-hidden="true">
+                  ↗
+                </span>
+                <input
+                  id="article-url"
+                  className="text-input"
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://example.com/support/article/123"
+                  aria-label="Article URL"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="primary-button convert-button"
+                disabled={!apiKey || loading || generatingKey}
+              >
+                {loading ? (
+                  <>
+                    <span className="button-spinner" />
+                    Converting…
+                  </>
+                ) : (
+                  <>
+                    Convert article
+                    <span aria-hidden="true"> →</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <p className="field-hint">
+              Enter the full URL of the support article you want to
+              convert.
+            </p>
+          </form>
+        </section>
+
+        {error && (
+          <div
+            className="preview-feedback preview-feedback-error"
+            role="alert"
+          >
+            <span className="feedback-icon" aria-hidden="true">!</span>
+            <span>{error}</span>
             <button
-              type="submit"
-              className="primary-button"
-              disabled={!apiKey || loading || generatingKey}
+              type="button"
+              className="feedback-dismiss"
+              onClick={() => setError('')}
+              aria-label="Dismiss error"
             >
-              {loading ? 'Converting…' : 'Convert'}
+              ×
             </button>
           </div>
-        </form>
+        )}
 
-        {error && <p className="error-message">{error}</p>}
+        {notice && !error && (
+          <div
+            className="preview-feedback preview-feedback-success"
+            role="status"
+          >
+            <span className="feedback-icon" aria-hidden="true">✓</span>
+            <span>{notice}</span>
+            <button
+              type="button"
+              className="feedback-dismiss"
+              onClick={() => setNotice('')}
+              aria-label="Dismiss message"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {loading && (
+          <section className="conversion-loading" aria-live="polite">
+            <span className="loading-spinner" />
+            <div>
+              <strong>Converting your article</strong>
+              <p>
+                Fetching the source content and generating Markdown…
+              </p>
+            </div>
+          </section>
+        )}
+
+        {!markdown && !loading && (
+          <section className="preview-empty-state">
+            <div className="empty-state-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 48 48"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M13 5.5H28L38 15.5V40C38 41.4 36.9 42.5 35.5 42.5H13C11.6 42.5 10.5 41.4 10.5 40V8C10.5 6.6 11.6 5.5 13 5.5Z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M27.5 6V16H37.5M17 24H31M17 30H31M17 36H26"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <h2>Your converted article will appear here</h2>
+            <p>
+              Generate temporary access and convert an article to see
+              the Markdown preview, metadata, and download options.
+            </p>
+            <div className="empty-state-features">
+              <span>✓ Rendered preview</span>
+              <span>✓ Raw Markdown</span>
+              <span>✓ Downloadable file</span>
+            </div>
+          </section>
+        )}
 
         {markdown && (
-          <div className="preview-layout">
-            <div className="markdown-card">
-              <div className="card-toolbar">
-                <div className="tab-group">
-                  <button
-                    type="button"
-                    className={raw ? 'tab-button' : 'tab-button active'}
-                    onClick={() => setRaw(false)}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    className={raw ? 'tab-button active' : 'tab-button'}
-                    onClick={() => setRaw(true)}
-                  >
-                    Markdown
-                  </button>
-                </div>
-
-                <div className="action-group">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => navigator.clipboard.writeText(markdown)}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={download}
-                  >
-                    Download .md
-                  </button>
+          <section className="preview-results">
+            <div className="results-heading">
+              <div className="results-title">
+                <div className="converter-step">02</div>
+                <div>
+                  <h2>Converted article</h2>
+                  <p>Your Markdown is ready to inspect or export.</p>
                 </div>
               </div>
 
-              <div className="card-body scroll-panel">
-                {raw ? (
-                  <pre className="markdown-output scroll-content">
-                    {markdown}
-                  </pre>
-                ) : (
-                  <article className="rendered-markdown scroll-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {body}
-                    </ReactMarkdown>
-                  </article>
+              <div className="results-badges">
+                <span className="result-badge">
+                  <span className="result-badge-dot" />
+                  Markdown ready
+                </span>
+                {attachmentCount > 0 && (
+                  <span className="result-badge">
+                    {attachmentCount} attachment
+                    {attachmentCount === 1 ? '' : 's'}
+                  </span>
                 )}
               </div>
             </div>
 
-            <aside className="meta-panel">
-              <h2>Article metadata</h2>
+            <div className="preview-layout">
+              <section className="markdown-card">
+                <div className="card-toolbar preview-card-toolbar">
+                  <div className="tab-group preview-tabs" role="tablist">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={!raw}
+                      className={!raw ? 'tab-button active' : 'tab-button'}
+                      onClick={() => setRaw(false)}
+                    >
+                      <span aria-hidden="true">◉</span> Preview
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={raw}
+                      className={raw ? 'tab-button active' : 'tab-button'}
+                      onClick={() => setRaw(true)}
+                    >
+                      <span aria-hidden="true">{'</>'}</span> Markdown
+                    </button>
+                  </div>
 
-              <ul className="metadata-list">
-                {Object.entries(metadata).map(([key, value]) => (
-                  <li
-                    key={key}
-                    className={
-                      key === 'products' || key === 'attachments'
-                        ? 'metadata-item nested'
-                        : 'metadata-item'
-                    }
-                  >
-                    <span>{key}</span>
-                    {renderMetadataValue(key, value)}
-                  </li>
-                ))}
-              </ul>
-            </aside>
-          </div>
+                  <div className="action-group preview-actions">
+                    <button
+                      type="button"
+                      className="secondary-button preview-action-button"
+                      onClick={copyMarkdown}
+                      title="Copy Markdown to clipboard"
+                    >
+                      <span aria-hidden="true">▣</span>
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button preview-download-button"
+                      onClick={downloadMarkdown}
+                      title="Download article.md"
+                    >
+                      <span aria-hidden="true">↓</span>
+                      Download .md
+                    </button>
+                  </div>
+                </div>
+
+                <div className="preview-source-bar">
+                  <span className="source-file-icon" aria-hidden="true">
+                    MD
+                  </span>
+                  <span className="source-filename">article.md</span>
+                  <span className="source-file-type">text/markdown</span>
+                </div>
+
+                <div className="card-body scroll-panel preview-card-body">
+                  {raw ? (
+                    <pre className="markdown-output scroll-content">
+                      {markdown}
+                    </pre>
+                  ) : (
+                    <article className="rendered-markdown scroll-content">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {body}
+                      </ReactMarkdown>
+                    </article>
+                  )}
+                </div>
+
+                <footer className="preview-card-footer">
+                  <span>
+                    {raw ? 'Raw Markdown source' : 'Rendered Markdown'}
+                  </span>
+                  <span>
+                    {markdown.length.toLocaleString()} characters
+                  </span>
+                </footer>
+              </section>
+
+              <aside className="meta-panel preview-meta-panel">
+                <div className="metadata-heading">
+                  <div>
+                    <span className="metadata-eyebrow">ARTICLE DETAILS</span>
+                    <h2>Metadata</h2>
+                  </div>
+                  <span className="metadata-count">
+                    {metadataEntries.length}
+                  </span>
+                </div>
+
+                {metadataEntries.length ? (
+                  <ul className="metadata-list">
+                    {metadataEntries.map(([key, value]) => (
+                      <li
+                        key={key}
+                        className={
+                          key === 'products' || key === 'attachments'
+                            ? 'metadata-item nested'
+                            : 'metadata-item'
+                        }
+                      >
+                        <span className="metadata-key">{key}</span>
+                        {renderMetadataValue(key, value)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="metadata-empty">
+                    No article metadata is available.
+                  </p>
+                )}
+              </aside>
+            </div>
+          </section>
         )}
       </div>
     </main>
