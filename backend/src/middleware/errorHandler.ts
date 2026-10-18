@@ -8,18 +8,13 @@ import type {
 import { logger } from '../lib/logger';
 
 export class HttpError extends Error {
-  statusCode: number;
-  expose: boolean;
-
   constructor(
-    statusCode: number,
+    public statusCode: number,
     message: string,
-    options: { expose?: boolean } = {},
+    public expose = true,
   ) {
     super(message);
     this.name = 'HttpError';
-    this.statusCode = statusCode;
-    this.expose = options.expose ?? true;
   }
 }
 
@@ -35,39 +30,6 @@ export const asyncHandler =
     Promise.resolve(handler(req, res, next)).catch(next);
   };
 
-const isValidationError = (error: unknown): boolean => {
-  if (error instanceof HttpError && error.statusCode === 400) {
-    return true;
-  }
-
-  if (error instanceof Error) {
-    return (
-      error.name === 'ValidationError' ||
-      /validation failed/i.test(error.message) ||
-      /required/i.test(error.message) ||
-      /invalid.*(body|payload|request)/i.test(error.message)
-    );
-  }
-
-  return false;
-};
-
-const getErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  return fallback;
-};
-
-const getStatusCode = (error: unknown): number => {
-  if (error instanceof HttpError) return error.statusCode;
-  if (error instanceof SyntaxError && 'body' in error) return 400;
-  if (isValidationError(error)) return 400;
-
-  return 500;
-};
-
 export const notFoundHandler = (
   req: Request,
   res: Response,
@@ -76,64 +38,99 @@ export const notFoundHandler = (
   next(new HttpError(404, 'Route not found'));
 };
 
+type ErrorBody = { error: string; message: string };
+
+const DEFAULT_ERROR: ErrorBody = {
+  error: 'Internal server error',
+  message: 'Something went wrong. Please try again later.',
+};
+
+const ERROR_BODIES: Record<number, ErrorBody> = {
+  400: {
+    error: 'Validation failed',
+    message: 'Please check your request and try again.',
+  },
+  401: {
+    error: 'Unauthorized',
+    message: 'Authentication is required.',
+  },
+  403: {
+    error: 'Forbidden',
+    message: 'You do not have permission to perform this action.',
+  },
+  404: {
+    error: 'Route not found',
+    message: 'The requested route could not be found.',
+  },
+  406: {
+    error: 'Not acceptable',
+    message: 'The requested response format is not supported.',
+  },
+  413: {
+    error: 'Payload too large',
+    message: 'Your request is too large. Please reduce the content and try again.',
+  },
+  429: {
+    error: 'Too many requests',
+    message: 'Please try again later.',
+  },
+  502: {
+    error: 'Bad gateway',
+    message: 'The upstream service failed. Please try again later.',
+  },
+  504: {
+    error: 'Gateway timeout',
+    message: 'The upstream service timed out. Please try again later.',
+  },
+};
+
 export const errorHandler: ErrorRequestHandler = (
-  error,
+  error: unknown,
   req,
   res,
   _next,
 ) => {
   const requestLogger = (req as any).log ?? logger;
-  const statusCode = getStatusCode(error);
 
-  // Keep technical details in server logs, never in API responses.
-  const logContext = {
-    err: error,
-    request: {
-      method: req.method,
-      url: req.originalUrl,
-      route: req.route?.path,
-      requestId: (req as any).id,
+  const isHttpError = error instanceof HttpError;
+  const isBodyTooLarge =
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    error.type === 'entity.too.large';
+
+  const isInvalidJson = error instanceof SyntaxError && 'body' in error;
+
+  const statusCode = isHttpError
+    ? error.statusCode
+    : isBodyTooLarge
+      ? 413
+      : isInvalidJson
+        ? 400
+        : 500;
+
+  requestLogger[statusCode >= 500 ? 'error' : 'warn'](
+    {
+      err: error,
+      request: {
+        method: req.method,
+        url: req.originalUrl,
+        requestId: (req as any).id,
+      },
     },
-  };
+    'Request error handled',
+  );
 
-  if (statusCode >= 500) {
-    requestLogger.error(
-      logContext,
-      error instanceof HttpError
-        ? 'HTTP error handled'
-        : 'Unhandled server error',
-    );
-  } else {
-    requestLogger.warn(logContext, 'Request error handled');
+
+  const response: ErrorBody = { ...(ERROR_BODIES[statusCode] ?? DEFAULT_ERROR) };
+
+ 
+  if (isHttpError && error.expose) {
+    response.message = error.message;
   }
-
-  const exposedMessage =
-    error instanceof HttpError && error.expose
-      ? error.message
-      : undefined;
-
-  const safeError =
-    statusCode === 404 ? 'Route not found'
-    : statusCode === 400 ? 'Validation failed'
-    : statusCode === 401 ? 'Unauthorized'
-    : statusCode === 403 ? 'Forbidden'
-    : statusCode === 406 ? 'Not acceptable'
-    : statusCode === 429 ? 'Too many requests'
-    : statusCode === 502 ? 'Bad gateway'
-    : 'Internal server error';
-
-  const safeMessage =
-    exposedMessage ??
-    (statusCode === 404 ? 'The requested route could not be found.'
-      : statusCode === 400 ? getErrorMessage(error, 'Please check your request and try again.')
-      : statusCode === 401 ? 'Please sign in to access this resource.'
-      : statusCode === 403 ? 'You do not have permission to perform this action.'
-      : statusCode === 429 ? 'Too many requests. Please try again later.'
-      : 'Something went wrong. Please try again later.');
 
   return res.status(statusCode).json({
     status: 'error',
-    error: safeError, // CHANGED: this field was missing before
-    message: safeMessage,
+    ...response,
   });
 };
