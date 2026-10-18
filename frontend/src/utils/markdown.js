@@ -5,8 +5,10 @@ function parseScalar(value) {
     return '';
   }
 
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
     return trimmed.slice(1, -1);
   }
 
@@ -25,45 +27,191 @@ function parseScalar(value) {
   return trimmed;
 }
 
-function parseNestedList(lines) {
-  const items = [];
-  let currentItem = null;
+function countIndent(line) {
+  return line.length - line.trimStart().length;
+}
 
-  for (const line of lines) {
-    const trimmed = line.trim();
+function parseBlock(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return [];
+  }
 
-    if (!trimmed) {
-      continue;
-    }
+  const normalizedLines = lines
+    .filter((line) => typeof line === 'string')
+    .map((line) => line.replace(/\t/g, '  '))
+    .filter((line) => line.trim());
 
-    if (trimmed.startsWith('- ')) {
-      if (currentItem) {
-        items.push(currentItem);
+  if (!normalizedLines.length) {
+    return [];
+  }
+
+  const firstIndent = countIndent(normalizedLines[0]);
+  const isList = normalizedLines[0].trim().startsWith('- ');
+
+  if (isList) {
+    const items = [];
+    let index = 0;
+
+    while (index < normalizedLines.length) {
+      const raw = normalizedLines[index];
+      const trimmed = raw.trim();
+
+      if (!trimmed.startsWith('- ')) {
+        index += 1;
+        continue;
       }
 
-      const content = trimmed.slice(2).trim();
-      currentItem = content ? { value: parseScalar(content) } : {};
-      continue;
+      const remainder = trimmed.slice(2).trim();
+      const item = {};
+      index += 1;
+
+      if (remainder) {
+        const match = remainder.match(/^([^:]+):\s*(.*)$/);
+
+        if (match) {
+          const [, key, rawValue] = match;
+          if (rawValue.trim() === '') {
+            const nested = [];
+            while (index < normalizedLines.length) {
+              const next = normalizedLines[index];
+              const nextTrim = next.trim();
+
+              if (!nextTrim) {
+                index += 1;
+                continue;
+              }
+
+              const nextIndent = countIndent(next);
+              if (nextIndent <= firstIndent || nextTrim.startsWith('- ')) {
+                break;
+              }
+
+              nested.push(next);
+              index += 1;
+            }
+
+            item[key.trim()] = nested.length ? parseBlock(nested) : '';
+          } else {
+            item[key.trim()] = parseScalar(rawValue);
+          }
+        } else {
+          items.push(parseScalar(remainder));
+          continue;
+        }
+      }
+
+      while (index < normalizedLines.length) {
+        const next = normalizedLines[index];
+        const nextTrim = next.trim();
+
+        if (!nextTrim) {
+          index += 1;
+          continue;
+        }
+
+        if (nextTrim.startsWith('- ')) {
+          break;
+        }
+
+        const nextIndent = countIndent(next);
+        if (nextIndent <= firstIndent) {
+          break;
+        }
+
+        const nextMatch = nextTrim.match(/^([^:]+):\s*(.*)$/);
+        if (!nextMatch) {
+          index += 1;
+          continue;
+        }
+
+        const [, nestedKey, nestedValue] = nextMatch;
+        index += 1;
+
+        if (nestedValue.trim() === '') {
+          const nested = [];
+          while (index < normalizedLines.length) {
+            const nestedLine = normalizedLines[index];
+            const nestedTrim = nestedLine.trim();
+
+            if (!nestedTrim) {
+              index += 1;
+              continue;
+            }
+
+            const nestedIndent = countIndent(nestedLine);
+            if (nestedIndent <= nextIndent) {
+              break;
+            }
+
+            nested.push(nestedLine);
+            index += 1;
+          }
+
+          item[nestedKey.trim()] = nested.length ? parseBlock(nested) : '';
+        } else {
+          item[nestedKey.trim()] = parseScalar(nestedValue);
+        }
+      }
+
+      items.push(item);
     }
 
-    if (!currentItem) {
+    return items;
+  }
+
+  const object = {};
+  let index = 0;
+
+  while (index < normalizedLines.length) {
+    const raw = normalizedLines[index];
+    const trimmed = raw.trim();
+
+    if (!trimmed) {
+      index += 1;
       continue;
     }
 
     const match = trimmed.match(/^([^:]+):\s*(.*)$/);
+
     if (!match) {
+      index += 1;
       continue;
     }
 
     const [, key, rawValue] = match;
-    currentItem[key.trim()] = rawValue ? parseScalar(rawValue) : '';
+    index += 1;
+
+    if (rawValue.trim() === '') {
+      const nested = [];
+      while (index < normalizedLines.length) {
+        const next = normalizedLines[index];
+        const nextTrim = next.trim();
+
+        if (!nextTrim) {
+          index += 1;
+          continue;
+        }
+
+        const nextIndent = countIndent(next);
+        if (nextIndent <= firstIndent) {
+          break;
+        }
+
+        nested.push(next);
+        index += 1;
+      }
+
+      object[key.trim()] = nested.length ? parseBlock(nested) : '';
+    } else {
+      object[key.trim()] = parseScalar(rawValue);
+    }
   }
 
-  if (currentItem) {
-    items.push(currentItem);
-  }
+  return object;
+}
 
-  return items;
+function parseStructuredValue(lines) {
+  return parseBlock(lines);
 }
 
 export function parseMarkdownMetadata(markdown = '') {
@@ -118,28 +266,18 @@ export function parseMarkdownMetadata(markdown = '') {
           continue;
         }
 
-        if (nextLine.startsWith('  - ')) {
-          nestedLines.push(nextLine.trim());
-          nextIndex += 1;
-          continue;
+        const nextIndent = nextLine.match(/^\s*/)?.[0].length ?? 0;
+
+        if (nextIndent <= 0) {
+          break;
         }
 
-        if (nextLine.startsWith('    ')) {
-          nestedLines.push(nextLine.trim());
-          nextIndex += 1;
-          continue;
-        }
-
-        break;
+        nestedLines.push(nextLine);
+        nextIndex += 1;
       }
 
-      if (nestedLines.length > 0) {
-        metadata[normalizedKey] = parseNestedList(nestedLines);
-        index = nextIndex - 1;
-      } else {
-        metadata[normalizedKey] = '';
-      }
-
+      metadata[normalizedKey] = nestedLines.length ? parseStructuredValue(nestedLines) : '';
+      index = nextIndex - 1;
       continue;
     }
 
