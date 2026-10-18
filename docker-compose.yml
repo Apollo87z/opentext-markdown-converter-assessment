@@ -4,10 +4,15 @@ services:
     container_name: markdown-converter-backend
     ports:
       - "3000:3000"
+    env_file:
+      - ./backend/.env
     environment:
       NODE_ENV: production
       PORT: 3000
       CORS_ORIGINS: "http://localhost:8080"
+      CLOUDFRONT_DISTRIBUTION_ID: ${CLOUDFRONT_DISTRIBUTION_ID}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
     restart: unless-stopped
 
   frontend:
