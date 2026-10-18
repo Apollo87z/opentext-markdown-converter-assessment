@@ -78,7 +78,7 @@ async function loadArticle(url: unknown) {
   return { url, articleId, content, result, fetchedAt };
 }
 
-async function invalidateArticleCache() {
+async function invalidateArticleCache(articleUrl: string) {
   if (!CLOUDFRONT_DISTRIBUTION_ID) {
     throw new HttpError(
       500,
@@ -87,6 +87,10 @@ async function invalidateArticleCache() {
   }
 
   try {
+    // Match the specific URL query-string variant in the cache.
+    const query = new URLSearchParams({ url: articleUrl }).toString();
+    const invalidationPath = `/api/v1/articles?${query}`;
+
     const response = await cloudFront.send(
       new CreateInvalidationCommand({
         DistributionId: CLOUDFRONT_DISTRIBUTION_ID,
@@ -94,15 +98,18 @@ async function invalidateArticleCache() {
           CallerReference: `article-refresh-${Date.now()}-${Math.random()}`,
           Paths: {
             Quantity: 1,
-            // Invalidate the normal endpoint and its query-string variants.
-            Items: ['/api/v1/articles*'],
+            Items: [invalidationPath],
           },
         },
       }),
     );
 
     return response.Invalidation?.Id;
-  } catch {
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
     throw new HttpError(502, 'Failed to invalidate the CloudFront cache.');
   }
 }
@@ -278,20 +285,19 @@ export async function getArticle(req: Request, res: Response) {
   let invalidationId: string | undefined;
 
   if (forceRefresh) {
-    // Invalidate the shared normal-response cache after fetching successfully.
-    invalidationId = await invalidateArticleCache();
+    // Invalidate only this article's cached query-string variant.
+    invalidationId = await invalidateArticleCache(url);
 
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('CDN-Cache-Control', 'no-store');
-    res.setHeader('X-Article-Fetched-At', fetchedAt);
   } else {
     res.setHeader(
       'Cache-Control',
       'public, max-age=0, s-maxage=86400',
     );
-    res.setHeader('X-Article-Fetched-At', fetchedAt);
   }
 
+  res.setHeader('X-Article-Fetched-At', fetchedAt);
   res.vary('Accept');
 
   const accept = req.get('Accept')?.toLowerCase();

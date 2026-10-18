@@ -12,9 +12,7 @@ function formatDate(value) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
+  if (Number.isNaN(date.getTime())) return String(value);
 
   return new Intl.DateTimeFormat(undefined, {
     year: 'numeric',
@@ -31,19 +29,16 @@ function formatTimeAgo(value, now = Date.now()) {
   if (!value) return 'Unknown';
 
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
 
-  if (Number.isNaN(date.getTime())) {
-    return 'Unknown';
-  }
-
-  const elapsedSeconds = Math.max(
+  const seconds = Math.max(
     0,
-    Math.floor((now - date.getTime()) / 1000)
+    Math.floor((now - date.getTime()) / 1000),
   );
 
-  if (elapsedSeconds < 60) return 'just now';
+  if (seconds < 60) return 'just now';
 
-  const minutes = Math.floor(elapsedSeconds / 60);
+  const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
     return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
   }
@@ -100,9 +95,7 @@ export default function LivePreview() {
     try {
       const res = await fetch('/api/v1/generate-key', {
         method: 'POST',
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: { Accept: 'application/json' },
       });
 
       const text = await res.text();
@@ -116,7 +109,7 @@ export default function LivePreview() {
 
       if (!res.ok) {
         throw new Error(
-          data.message ?? 'Failed to generate temporary access.'
+          data.message ?? 'Failed to generate temporary access.',
         );
       }
 
@@ -130,7 +123,7 @@ export default function LivePreview() {
       setError(
         err instanceof Error
           ? err.message
-          : 'Failed to generate temporary access.'
+          : 'Failed to generate temporary access.',
       );
     } finally {
       setGeneratingKey(false);
@@ -148,22 +141,19 @@ export default function LivePreview() {
     setNotice('');
 
     try {
-      const params = new URLSearchParams({ url });
+      const params = new URLSearchParams({ url: url.trim() });
 
       if (forceRefresh) {
         params.set('forceRefresh', 'true');
       }
 
-      const res = await fetch(
-        `/api/v1/articles?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            'x-api-key': apiKey,
-            Accept: 'text/markdown',
-          },
-        }
-      );
+      const res = await fetch(`/api/v1/articles?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+          Accept: 'text/markdown',
+        },
+      });
 
       const text = await res.text();
 
@@ -185,19 +175,17 @@ export default function LivePreview() {
         throw new Error(message);
       }
 
+      // A successful response becomes the currently displayed article.
       setMarkdown(text);
       setRaw(false);
-
-      // This timestamp comes from the backend, not the browser clock.
       setFetchedAt(res.headers.get('x-article-fetched-at') || '');
-
       setNotice(
         forceRefresh
           ? 'Article refreshed successfully.'
-          : 'Article converted successfully.'
+          : 'Article converted successfully.',
       );
     } catch (err) {
-      // Preserve the existing preview if a refresh fails.
+      // Keep the existing preview and timestamp if a refresh fails.
       if (!forceRefresh) {
         setMarkdown('');
         setFetchedAt('');
@@ -206,7 +194,7 @@ export default function LivePreview() {
       setError(
         err instanceof Error
           ? err.message
-          : 'Failed to convert article.'
+          : 'Failed to convert article.',
       );
     } finally {
       setLoading(false);
@@ -220,6 +208,18 @@ export default function LivePreview() {
 
   const refreshArticle = async () => {
     await fetchArticle(true);
+  };
+
+  const handleUrlChange = (event) => {
+    const nextUrl = event.target.value;
+    setUrl(nextUrl);
+
+    // Do not show the previous article or its timestamp for a new URL.
+    setMarkdown('');
+    setFetchedAt('');
+    setRaw(false);
+    setError('');
+    setNotice('');
   };
 
   const copyMarkdown = async () => {
@@ -253,9 +253,7 @@ export default function LivePreview() {
   };
 
   const formatMetadataValue = (value) => {
-    if (value === null || value === undefined || value === '') {
-      return '—';
-    }
+    if (value === null || value === undefined || value === '') return '—';
 
     if (Array.isArray(value)) {
       if (!value.length) return '—';
@@ -264,7 +262,7 @@ export default function LivePreview() {
         .map((item) =>
           typeof item === 'object' && item !== null
             ? JSON.stringify(item)
-            : String(item)
+            : String(item),
         )
         .join(', ');
     }
@@ -279,19 +277,13 @@ export default function LivePreview() {
   const renderMetadataValue = (key, value) => {
     if (key === 'createdAt' || key === 'updatedAt') {
       return (
-        <strong className="metadata-date">
-          {formatDate(value)}
-        </strong>
+        <strong className="metadata-date">{formatDate(value)}</strong>
       );
     }
 
     if (key === 'products') {
       if (!Array.isArray(value) || !value.length) {
-        return (
-          <div className="metadata-empty">
-            No products available.
-          </div>
-        );
+        return <div className="metadata-empty">No products available.</div>;
       }
 
       return (
@@ -322,9 +314,7 @@ export default function LivePreview() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="metadata-empty">
-                    No versions listed.
-                  </div>
+                  <div className="metadata-empty">No versions listed.</div>
                 )}
               </div>
             );
@@ -336,9 +326,7 @@ export default function LivePreview() {
     if (key === 'attachments') {
       if (!Array.isArray(value) || !value.length) {
         return (
-          <div className="metadata-empty">
-            No attachments available.
-          </div>
+          <div className="metadata-empty">No attachments available.</div>
         );
       }
 
@@ -353,12 +341,10 @@ export default function LivePreview() {
             const attachmentType =
               attachment?.contentType ?? 'Unknown type';
             const attachmentSize =
-              attachment?.size !== null &&
-              attachment?.size !== undefined
+              attachment?.size !== null && attachment?.size !== undefined
                 ? `${String(attachment.size)} bytes`
                 : 'Unknown size';
-            const isExternal =
-              attachment?.isExternalAttachment === true;
+            const isExternal = attachment?.isExternalAttachment === true;
 
             return (
               <div
@@ -414,9 +400,7 @@ export default function LivePreview() {
       return (
         <ul className="metadata-sublist">
           {value.map((item, index) => (
-            <li key={`${key}-${index}`}>
-              {formatMetadataValue(item)}
-            </li>
+            <li key={`${key}-${index}`}>{formatMetadataValue(item)}</li>
           ))}
         </ul>
       );
@@ -458,9 +442,7 @@ export default function LivePreview() {
               <span className="preview-eyebrow-dot" />
               MARKDOWN CONVERTER
             </div>
-
             <h1>Live Preview</h1>
-
             <p className="preview-subtitle">
               Convert an OpenText support article into Markdown.
               Preview the content, inspect its metadata, or download
@@ -483,18 +465,14 @@ export default function LivePreview() {
             <div className="converter-step">01</div>
             <div>
               <h2>Prepare your conversion</h2>
-              <p>
-                Generate temporary access, then enter an article URL.
-              </p>
+              <p>Generate temporary access, then enter an article URL.</p>
             </div>
           </div>
 
           <div className="access-row">
             <div className="access-indicator">
               <span
-                className={`access-indicator-dot ${
-                  apiKey ? 'is-ready' : ''
-                }`}
+                className={`access-indicator-dot ${apiKey ? 'is-ready' : ''}`}
               />
               <div>
                 <strong>
@@ -534,18 +512,13 @@ export default function LivePreview() {
 
             <div className="input-row preview-input-row">
               <div className="url-input-wrap">
-                <span className="url-input-icon" aria-hidden="true">
-                  ↗
-                </span>
+                <span className="url-input-icon" aria-hidden="true">↗</span>
                 <input
                   id="article-url"
                   className="text-input"
                   type="url"
                   value={url}
-                  onChange={(event) => {
-                    setUrl(event.target.value);
-                    setFetchedAt('');
-                  }}
+                  onChange={handleUrlChange}
                   placeholder="https://example.com/support/article/123"
                   aria-label="Article URL"
                   required
@@ -563,26 +536,19 @@ export default function LivePreview() {
                     Converting…
                   </>
                 ) : (
-                  <>
-                    Convert article
-                    <span aria-hidden="true"> →</span>
-                  </>
+                  <>Convert article <span aria-hidden="true"> →</span></>
                 )}
               </button>
             </div>
 
             <p className="field-hint">
-              Enter the full URL of the support article you want to
-              convert.
+              Enter the full URL of the support article you want to convert.
             </p>
           </form>
         </section>
 
         {error && (
-          <div
-            className="preview-feedback preview-feedback-error"
-            role="alert"
-          >
+          <div className="preview-feedback preview-feedback-error" role="alert">
             <span className="feedback-icon" aria-hidden="true">!</span>
             <span>{error}</span>
             <button
@@ -683,8 +649,7 @@ export default function LivePreview() {
                 </span>
                 {attachmentCount > 0 && (
                   <span className="result-badge">
-                    {attachmentCount} attachment
-                    {attachmentCount === 1 ? '' : 's'}
+                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </span>
                 )}
               </div>
@@ -694,9 +659,7 @@ export default function LivePreview() {
               <div className="access-indicator">
                 <span className="access-indicator-dot is-ready" />
                 <div>
-                  <strong>
-                    Last refreshed {formatTimeAgo(fetchedAt, now)}
-                  </strong>
+                  <strong>Last refreshed {formatTimeAgo(fetchedAt, now)}</strong>
                   <span>
                     {fetchedAt
                       ? formatDate(fetchedAt)
@@ -710,7 +673,7 @@ export default function LivePreview() {
                 className="secondary-button access-button"
                 onClick={refreshArticle}
                 disabled={!apiKey || loading || generatingKey}
-                title="Fetch the latest article and invalidate the cached response"
+                title="Fetch the latest article and invalidate its cached response"
               >
                 {loading ? (
                   <>
@@ -754,8 +717,7 @@ export default function LivePreview() {
                       onClick={copyMarkdown}
                       title="Copy Markdown to clipboard"
                     >
-                      <span aria-hidden="true">▣</span>
-                      Copy
+                      <span aria-hidden="true">▣</span> Copy
                     </button>
                     <button
                       type="button"
@@ -763,25 +725,20 @@ export default function LivePreview() {
                       onClick={downloadMarkdown}
                       title="Download article.md"
                     >
-                      <span aria-hidden="true">↓</span>
-                      Download .md
+                      <span aria-hidden="true">↓</span> Download .md
                     </button>
                   </div>
                 </div>
 
                 <div className="preview-source-bar">
-                  <span className="source-file-icon" aria-hidden="true">
-                    MD
-                  </span>
+                  <span className="source-file-icon" aria-hidden="true">MD</span>
                   <span className="source-filename">article.md</span>
                   <span className="source-file-type">text/markdown</span>
                 </div>
 
                 <div className="card-body scroll-panel preview-card-body">
                   {raw ? (
-                    <pre className="markdown-output scroll-content">
-                      {markdown}
-                    </pre>
+                    <pre className="markdown-output scroll-content">{markdown}</pre>
                   ) : (
                     <article className="rendered-markdown scroll-content">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -792,12 +749,8 @@ export default function LivePreview() {
                 </div>
 
                 <footer className="preview-card-footer">
-                  <span>
-                    {raw ? 'Raw Markdown source' : 'Rendered Markdown'}
-                  </span>
-                  <span>
-                    {markdown.length.toLocaleString()} characters
-                  </span>
+                  <span>{raw ? 'Raw Markdown source' : 'Rendered Markdown'}</span>
+                  <span>{markdown.length.toLocaleString()} characters</span>
                 </footer>
               </section>
 
@@ -807,9 +760,7 @@ export default function LivePreview() {
                     <span className="metadata-eyebrow">ARTICLE DETAILS</span>
                     <h2>Metadata</h2>
                   </div>
-                  <span className="metadata-count">
-                    {metadataEntries.length}
-                  </span>
+                  <span className="metadata-count">{metadataEntries.length}</span>
                 </div>
 
                 {metadataEntries.length ? (
@@ -829,9 +780,7 @@ export default function LivePreview() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="metadata-empty">
-                    No article metadata is available.
-                  </p>
+                  <p className="metadata-empty">No article metadata is available.</p>
                 )}
               </aside>
             </div>
