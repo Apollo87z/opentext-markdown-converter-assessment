@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import { parseMarkdownMetadata } from './utils/markdown';
 
 const DEFAULT_URL =
@@ -888,7 +889,10 @@ export default function LivePreview() {
                     </pre>
                   ) : (
                     <article className="rendered-markdown scroll-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeSanitize]}
+                      >
                         {body}
                       </ReactMarkdown>
                     </article>
