@@ -1,4 +1,3 @@
-
 import { useMemo, useState } from 'react';
 
 const API_BASE_URL = 'https://dizrmwyelhihs.cloudfront.net';
@@ -124,7 +123,6 @@ export default function Docs() {
     { id: 'overview', label: 'Overview' },
     { id: 'health', label: 'GET /api/v1/health' },
     { id: 'articles', label: 'GET /api/v1/articles' },
-    { id: 'convert', label: 'POST /api/v1/convert' },
     { id: 'generate-key', label: 'POST /api/v1/generate-key' },
     { id: 'errors', label: 'Errors' },
   ];
@@ -164,10 +162,20 @@ export default function Docs() {
 
   const articleExamples = [
     {
-      language: 'bash',
-      label: 'cURL',
-      code: `curl "${API_BASE_URL}/api/v1/articles?url=$(printf '%s' '${ARTICLE_URL}' | jq -sRr @uri)" \\
-  -H "x-api-key: ${API_KEY}"`,
+      language: 'bash-markdown',
+      label: 'cURL · Markdown',
+      code: `curl -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: text/markdown"`,
+    },
+    {
+      language: 'bash-json',
+      label: 'cURL · JSON',
+      code: `curl -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: application/json"`,
     },
     {
       language: 'javascript',
@@ -180,6 +188,7 @@ const response = await fetch(
   {
     headers: {
       'x-api-key': '${API_KEY}',
+      Accept: 'application/json',
     },
   },
 );
@@ -188,8 +197,9 @@ if (!response.ok) {
   throw new Error('Request failed: ' + response.status);
 }
 
-const markdown = await response.text();
-console.log(markdown);`,
+const data = await response.json();
+console.log(data.article.title);
+console.log(data.markdown);`,
     },
     {
       language: 'python',
@@ -199,90 +209,14 @@ console.log(markdown);`,
 response = requests.get(
     '${API_BASE_URL}/api/v1/articles',
     params={'url': '${ARTICLE_URL}'},
-    headers={'x-api-key': '${API_KEY}'},
-    timeout=30,
-)
-response.raise_for_status()
-print(response.text)`,
-    },
-    {
-      language: 'markdown',
-      label: 'Markdown Output',
-      code: `---
-status: success
-id: "1986936"
-title: "Example article"
-sourceUrl: "${ARTICLE_URL}"
----
-
-# Example article
-
-Example Markdown content
-
-## Attachments
-
-- [Example attachment](https://my.opentext.com/example.pdf)`,
-    },
-  ];
-
-  const convertExamples = [
-    {
-      language: 'bash-json',
-      label: 'cURL · JSON',
-      code: `curl -X POST "${API_BASE_URL}/api/v1/convert" \\
-  -H "Content-Type: application/json" \\
-  -H "Accept: application/json" \\
-  -H "x-api-key: ${API_KEY}" \\
-  -d '{"url":"${ARTICLE_URL}"}'`,
-    },
-    {
-      language: 'bash-markdown',
-      label: 'cURL · Markdown',
-      code: `curl -X POST "${API_BASE_URL}/api/v1/convert" \\
-  -H "Content-Type: application/json" \\
-  -H "Accept: text/markdown" \\
-  -H "x-api-key: ${API_KEY}" \\
-  -d '{"url":"${ARTICLE_URL}"}'`,
-    },
-    {
-      language: 'javascript',
-      label: 'JavaScript',
-      code: `const response = await fetch('${API_BASE_URL}/api/v1/convert', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    'x-api-key': '${API_KEY}',
-  },
-  body: JSON.stringify({ url: '${ARTICLE_URL}' }),
-});
-
-if (!response.ok) {
-  throw new Error('Conversion failed: ' + response.status);
-}
-
-const data = await response.json();
-console.log(data.status);
-console.log(data.article.title);
-console.log(data.markdown);`,
-    },
-    {
-      language: 'python',
-      label: 'Python',
-      code: `import requests
-
-response = requests.post(
-    '${API_BASE_URL}/api/v1/convert',
-    json={'url': '${ARTICLE_URL}'},
     headers={
-        'Accept': 'application/json',
         'x-api-key': '${API_KEY}',
+        'Accept': 'application/json',
     },
     timeout=30,
 )
 response.raise_for_status()
 data = response.json()
-print(data['status'])
 print(data['article']['title'])
 print(data['markdown'])`,
     },
@@ -410,8 +344,8 @@ print(response.json()['apiKey'])`,
               <p className="docs-eyebrow">API REFERENCE</p>
               <h1>OpenText Markdown Converter</h1>
               <p className="docs-description">
-                Retrieve OpenText support articles, convert them to Markdown,
-                and integrate the results into your applications.
+                Retrieve OpenText support articles as Markdown or structured
+                JSON for applications and AI agents.
               </p>
             </div>
 
@@ -445,7 +379,7 @@ print(response.json()['apiKey'])`,
                   <h2>Endpoints</h2>
                   <p>Available API operations</p>
                 </div>
-                <span className="docs-endpoint-count">4 endpoints</span>
+                <span className="docs-endpoint-count">3 endpoints</span>
               </div>
 
               <table className="docs-route-table">
@@ -459,8 +393,7 @@ print(response.json()['apiKey'])`,
                 <tbody>
                   {[
                     ['GET', 'health', '/api/v1/health', 'Check service health.'],
-                    ['GET', 'articles', '/api/v1/articles', 'Retrieve an article as Markdown.'],
-                    ['POST', 'convert', '/api/v1/convert', 'Convert an article to JSON or Markdown.'],
+                    ['GET', 'articles', '/api/v1/articles', 'Retrieve an article as JSON or Markdown.'],
                     ['POST', 'generate-key', '/api/v1/generate-key', 'Request an API key.'],
                   ].map(([method, id, path, description]) => (
                     <tr key={id}>
@@ -488,9 +421,9 @@ print(response.json()['apiKey'])`,
             <div className="docs-auth-notice">
               <h2>API authentication</h2>
               <p>
-                The articles and convert endpoints require an API key.
-                Include your key in the <code>x-api-key</code> request header.
-                Requests without a valid key receive HTTP <code>401</code>.
+                The articles endpoint requires an API key. Include your key
+                in the <code>x-api-key</code> request header. Requests without
+                a valid key receive HTTP <code>401</code>.
               </p>
               <p>
                 The health endpoint remains public. Do not put API keys in
@@ -523,50 +456,30 @@ print(response.json()['apiKey'])`,
             </div>
 
             <p>
-              Loads an article using the required <code>url</code> query
-              parameter and returns Markdown.
+              Retrieves an OpenText support article using the required{' '}
+              <code>url</code> query parameter. Set the <code>Accept</code>{' '}
+              header to choose the response format.
             </p>
 
             <ul>
               <li><strong>Authentication:</strong> <code>x-api-key</code> header</li>
-              <li><strong>Query parameter:</strong> <code>url</code></li>
-              <li><strong>Output:</strong> <code>text/markdown</code></li>
+              <li><strong>Query parameter:</strong> <code>url</code> — an OpenText support article URL</li>
+              <li><strong>Markdown:</strong> <code>Accept: text/markdown</code></li>
+              <li><strong>JSON:</strong> <code>Accept: application/json</code></li>
+              <li><strong>Default:</strong> Markdown when the header is omitted or accepts <code>*/*</code>.</li>
+              <li><strong>Unsupported format:</strong> HTTP <code>406</code>.</li>
               <li><strong>Example article:</strong> <code>{ARTICLE_URL}</code></li>
             </ul>
 
-            <CodeExamplePanel id="articles" examples={articleExamples} />
-          </section>
-
-          <section id="convert" className="docs-section">
-            <div className="docs-section-header">
-              <div>
-                <p className="docs-eyebrow">Endpoint · Authentication required</p>
-                <h2>POST /api/v1/convert</h2>
-              </div>
-            </div>
-
+            <h3>Response formats</h3>
             <p>
-              Sends an article URL in a JSON request body. Use the{' '}
-              <code>Accept</code> header to request JSON or Markdown output.
+              Markdown responses contain article front matter, converted
+              article content, and attachment links. JSON responses contain
+              the article metadata and a <code>markdown</code> field with the
+              converted content.
             </p>
 
-            <ul>
-              <li><strong>Authentication:</strong> <code>x-api-key</code> header</li>
-              <li><strong>Content-Type:</strong> <code>application/json</code></li>
-              <li>
-                <strong>Request body:</strong>{' '}
-                <code>{'{ "url": "' + ARTICLE_URL + '" }'}</code>
-              </li>
-              <li><strong>JSON output:</strong> <code>Accept: application/json</code></li>
-              <li><strong>Markdown output:</strong> <code>Accept: text/markdown</code></li>
-              <li>
-                <strong>Default output:</strong> Markdown when the Accept
-                header is omitted or accepts <code>*/*</code>.
-              </li>
-              <li><strong>Unsupported format:</strong> HTTP <code>406</code>.</li>
-            </ul>
-
-            <CodeExamplePanel id="convert" examples={convertExamples} />
+            <CodeExamplePanel id="articles" examples={articleExamples} />
           </section>
 
           <section id="generate-key" className="docs-section">
@@ -594,12 +507,12 @@ print(response.json()['apiKey'])`,
             </div>
 
             <p>
-              Error responses contain <code>error</code> and may contain
-              additional fields depending on the endpoint.
+              Error responses contain an error description. The exact response
+              fields depend on the error handler and endpoint.
             </p>
 
             <ul>
-              <li><strong>400</strong> — invalid URL or malformed JSON.</li>
+              <li><strong>400</strong> — invalid URL or malformed request.</li>
               <li><strong>401</strong> — missing or invalid API key.</li>
               <li><strong>403</strong> — forbidden.</li>
               <li><strong>404</strong> — route not found.</li>

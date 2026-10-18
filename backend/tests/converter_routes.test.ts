@@ -51,12 +51,10 @@ const successResponse = (
     }),
   }) as Response;
 
-// Mocked upstream that returns a given payload as the JSON body.
 const payloadFetch = (payload: unknown) =>
   (async () => ({ ok: true, json: async () => payload }) as Response) as typeof fetch;
 
-// POST /convert with a mocked upstream article. Returns the supertest response.
-const convertWith = async (
+const getArticleWith = async (
   overrides: Record<string, unknown> = {},
   accept = 'application/json',
 ) => {
@@ -66,17 +64,19 @@ const convertWith = async (
     (async () => successResponse(overrides)) as typeof fetch,
     async () => {
       res = await request(buildApp())
-        .post('/convert')
-        .set('Accept', accept)
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl })
+        .set('Accept', accept);
     },
   );
 
   return res;
 };
 
-// POST /convert with a body that must be rejected. Also counts fetch calls.
-const postExpectingNoFetch = async (body: unknown) => {
+const getExpectingNoFetch = async (
+  url?: unknown,
+  duplicate = false,
+) => {
   let fetchCalls = 0;
   let res: any;
 
@@ -86,7 +86,15 @@ const postExpectingNoFetch = async (body: unknown) => {
       return successResponse();
     }) as typeof fetch,
     async () => {
-      res = await request(buildApp()).post('/convert').send(body as object);
+      let req = request(buildApp()).get('/articles');
+
+      if (duplicate && typeof url === 'string') {
+        req = req.query({ url: [url, url] });
+      } else if (url !== undefined) {
+        req = req.query({ url });
+      }
+
+      res = await req;
     },
   );
 
@@ -94,11 +102,11 @@ const postExpectingNoFetch = async (body: unknown) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/* 1. Input validation (400). fetch must never be called.                      */
+/* 1. Input validation (400)                                                   */
 /* -------------------------------------------------------------------------- */
 
-test('POST /convert returns 400 when url is missing', async () => {
-  const { res, fetchCalls } = await postExpectingNoFetch({});
+test('GET /articles returns 400 when url is missing', async () => {
+  const { res, fetchCalls } = await getExpectingNoFetch();
 
   assert.equal(res.status, 400);
   assert.equal(res.body.status, 'error');
@@ -107,19 +115,17 @@ test('POST /convert returns 400 when url is missing', async () => {
   assert.equal(fetchCalls, 0);
 });
 
-test('POST /convert returns 400 when url is not a string or is blank', async () => {
-  const invalidBodies = [{ url: 123 }, { url: '' }, { url: '   ' }];
+test('GET /articles returns 400 when url is not a string or is blank', async () => {
+  for (const url of [123, '', '   ']) {
+    const { res, fetchCalls } = await getExpectingNoFetch(url);
 
-  for (const body of invalidBodies) {
-    const { res, fetchCalls } = await postExpectingNoFetch(body);
-
-    assert.equal(res.status, 400, JSON.stringify(body));
-    assert.equal(res.body.status, 'error', JSON.stringify(body));
-    assert.equal(fetchCalls, 0, JSON.stringify(body));
+    assert.equal(res.status, 400, String(url));
+    assert.equal(res.body.status, 'error', String(url));
+    assert.equal(fetchCalls, 0, String(url));
   }
 });
 
-test('POST /convert returns 400 for invalid or blocked article URLs', async () => {
+test('GET /articles returns 400 for invalid or blocked article URLs', async () => {
   const invalidUrls = [
     'not-a-url',
     'https://my.opentext.com/support/article/abc',
@@ -130,49 +136,30 @@ test('POST /convert returns 400 for invalid or blocked article URLs', async () =
     'https://my.opentext.com/support/article',
   ];
 
-  for (const value of invalidUrls) {
-    const { res, fetchCalls } = await postExpectingNoFetch({ url: value });
+  for (const url of invalidUrls) {
+    const { res, fetchCalls } = await getExpectingNoFetch(url);
 
-    assert.equal(res.status, 400, value);
-    assert.equal(res.body.status, 'error', value);
-    assert.equal(fetchCalls, 0, value);
+    assert.equal(res.status, 400, url);
+    assert.equal(res.body.status, 'error', url);
+    assert.equal(fetchCalls, 0, url);
   }
 });
 
-test('POST /convert returns 400 when url exceeds 2048 chars', async () => {
+test('GET /articles returns 400 when url exceeds 2048 characters', async () => {
   const longUrl = `https://my.opentext.com/support/article/${'9'.repeat(2100)}`;
-  const { res, fetchCalls } = await postExpectingNoFetch({ url: longUrl });
+  const { res, fetchCalls } = await getExpectingNoFetch(longUrl);
 
   assert.equal(res.status, 400);
   assert.equal(res.body.message, 'Please provide a valid article URL.');
   assert.equal(fetchCalls, 0);
 });
 
-test('GET /articles returns 400 and does not call fetch when url is missing', async () => {
-  let fetchCalled = false;
+test('GET /articles returns 400 when url is supplied twice', async () => {
+  const { res, fetchCalls } = await getExpectingNoFetch(articleUrl, true);
 
-  await withMockedFetch(
-    (async () => {
-      fetchCalled = true;
-      return successResponse();
-    }) as typeof fetch,
-    async () => {
-      const response = await request(buildApp()).get('/articles');
-
-      assert.equal(response.status, 400);
-      assert.equal(response.body.error, 'Validation failed');
-      assert.equal(fetchCalled, false);
-    },
-  );
-});
-
-test('GET /articles returns 400 when url is supplied twice (array)', async () => {
-  const response = await request(buildApp())
-    .get('/articles')
-    .query({ url: [articleUrl, articleUrl] });
-
-  assert.equal(response.status, 400);
-  assert.equal(response.body.error, 'Validation failed');
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'Validation failed');
+  assert.equal(fetchCalls, 0);
 });
 
 test('valid article URLs with trailing slash, query string, or hash are accepted', async () => {
@@ -182,15 +169,15 @@ test('valid article URLs with trailing slash, query string, or hash are accepted
     'https://my.opentext.com/support/article/1986936#section',
   ];
 
-  for (const value of validUrls) {
+  for (const url of validUrls) {
     await withMockedFetch(
       (async () => successResponse()) as typeof fetch,
       async () => {
         const response = await request(buildApp())
-          .post('/convert')
-          .send({ url: value });
+          .get('/articles')
+          .query({ url });
 
-        assert.equal(response.status, 200, value);
+        assert.equal(response.status, 200, url);
       },
     );
   }
@@ -200,7 +187,7 @@ test('valid article URLs with trailing slash, query string, or hash are accepted
 /* 2. Upstream failures (502)                                                  */
 /* -------------------------------------------------------------------------- */
 
-test('fetch is called with the correct API URL and a timeout signal', async () => {
+test('fetch uses the correct API URL and a timeout signal', async () => {
   let seenUrl: string | undefined;
   let seenSignal: AbortSignal | undefined;
 
@@ -212,8 +199,8 @@ test('fetch is called with the correct API URL and a timeout signal', async () =
     }) as typeof fetch,
     async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 200);
       assert.equal(seenUrl, apiUrl);
@@ -222,13 +209,13 @@ test('fetch is called with the correct API URL and a timeout signal', async () =
   );
 });
 
-test('POST /convert returns 502 when upstream responds with a non-OK status', async () => {
+test('GET /articles returns 502 when upstream responds with a non-OK status', async () => {
   await withMockedFetch(
     (async () => ({ ok: false, status: 500 }) as Response) as typeof fetch,
     async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 502);
       assert.equal(response.body.error, 'Bad gateway');
@@ -237,15 +224,15 @@ test('POST /convert returns 502 when upstream responds with a non-OK status', as
   );
 });
 
-test('POST /convert returns 502 when fetch throws', async () => {
+test('GET /articles returns 502 when fetch throws', async () => {
   await withMockedFetch(
     (async () => {
       throw new Error('network timeout');
     }) as typeof fetch,
     async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 502);
       assert.equal(response.body.message, 'Failed to load article.');
@@ -253,7 +240,7 @@ test('POST /convert returns 502 when fetch throws', async () => {
   );
 });
 
-test('POST /convert returns 502 when response.json() throws', async () => {
+test('GET /articles returns 502 when response.json() throws', async () => {
   await withMockedFetch(
     (async () =>
       ({
@@ -264,8 +251,8 @@ test('POST /convert returns 502 when response.json() throws', async () => {
       }) as unknown as Response) as typeof fetch,
     async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 502);
       assert.equal(response.body.message, 'Failed to load article.');
@@ -273,7 +260,7 @@ test('POST /convert returns 502 when response.json() throws', async () => {
   );
 });
 
-test('POST /convert returns 502 when the article payload is invalid', async () => {
+test('GET /articles returns 502 when the article payload is invalid', async () => {
   const invalidPayloads: Array<[string, unknown]> = [
     ['no response key', {}],
     ['empty response object', { response: {} }],
@@ -285,8 +272,8 @@ test('POST /convert returns 502 when the article payload is invalid', async () =
   for (const [name, payload] of invalidPayloads) {
     await withMockedFetch(payloadFetch(payload), async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 502, name);
       assert.equal(response.body.error, 'Bad gateway', name);
@@ -295,44 +282,24 @@ test('POST /convert returns 502 when the article payload is invalid', async () =
   }
 });
 
-test('Content of exactly 2,000,000 chars is accepted', async () => {
-  const response = await convertWith({ Content: 'A'.repeat(2_000_000) });
+test('Content of exactly 2,000,000 characters is accepted', async () => {
+  const response = await getArticleWith({ Content: 'A'.repeat(2_000_000) });
 
   assert.equal(response.status, 200);
 });
 
-test('Content over 2,000,000 chars returns 502 Invalid article response.', async () => {
-  const response = await convertWith({ Content: 'A'.repeat(2_000_001) });
+test('Content over 2,000,000 characters returns 502', async () => {
+  const response = await getArticleWith({
+    Content: 'A'.repeat(2_000_001),
+  });
 
   assert.equal(response.status, 502);
   assert.equal(response.body.message, 'Invalid article response.');
 });
 
 /* -------------------------------------------------------------------------- */
-/* 3. Request-level errors (errorHandler / app)                                */
+/* 3. Request-level errors                                                     */
 /* -------------------------------------------------------------------------- */
-
-test('POST /convert returns 400 when request body is malformed JSON', async () => {
-  const response = await request(buildApp())
-    .post('/convert')
-    .set('Content-Type', 'application/json')
-    .send('{not valid json');
-
-  assert.equal(response.status, 400);
-  assert.equal(response.body.error, 'Validation failed');
-});
-
-test('POST /convert returns 413 for oversized JSON bodies', async () => {
-  const response = await request(buildApp())
-    .post('/convert')
-    .send({
-      url: articleUrl,
-      payload: 'x'.repeat(1024 * 1024 + 1),
-    });
-
-  assert.equal(response.status, 413);
-  assert.equal(response.body.error, 'Payload too large');
-});
 
 test('GET /missing-route returns 404', async () => {
   const response = await request(buildApp()).get('/missing-route');
@@ -341,8 +308,9 @@ test('GET /missing-route returns 404', async () => {
   assert.equal(response.body.error, 'Route not found');
 });
 
-test('unexpected errors return the generic 500 response without leaking details', async () => {
+test('unexpected errors return generic 500 without leaking details', async () => {
   const app = express();
+
   app.use(express.json());
   app.get('/_boom', () => {
     throw new Error('top-secret-stack-trace');
@@ -353,7 +321,10 @@ test('unexpected errors return the generic 500 response without leaking details'
 
   assert.equal(response.status, 500);
   assert.equal(response.body.error, 'Internal server error');
-  assert.equal(response.body.message, 'Something went wrong. Please try again later.');
+  assert.equal(
+    response.body.message,
+    'Something went wrong. Please try again later.',
+  );
   assert.equal(response.text.includes('top-secret-stack-trace'), false);
 });
 
@@ -361,14 +332,15 @@ test('unexpected errors return the generic 500 response without leaking details'
 /* 4. Successful responses and content negotiation                             */
 /* -------------------------------------------------------------------------- */
 
-test('POST /convert with Accept: application/json returns 200 and article metadata', async () => {
-  const response = await convertWith({
+test('GET /articles with Accept: application/json returns article metadata', async () => {
+  const response = await getArticleWith({
     Id: '1986936',
     ArticleType: 'Article',
     Views: 42,
   });
 
   assert.equal(response.status, 200);
+  assert.match(response.headers['content-type'], /application\/json/);
   assert.equal(response.body.status, 'success');
   assert.equal(response.body.sourceUrl, articleUrl);
   assert.equal(response.body.contentType, 'text/markdown');
@@ -377,13 +349,13 @@ test('POST /convert with Accept: application/json returns 200 and article metada
   assert.match(response.body.markdown, /Sample article/i);
 });
 
-test('POST /convert with no Accept returns Markdown', async () => {
+test('GET /articles without Accept returns Markdown', async () => {
   await withMockedFetch(
     (async () => successResponse()) as typeof fetch,
     async () => {
       const response = await request(buildApp())
-        .post('/convert')
-        .send({ url: articleUrl });
+        .get('/articles')
+        .query({ url: articleUrl });
 
       assert.equal(response.status, 200);
       assert.match(response.headers['content-type'], /text\/markdown/);
@@ -393,9 +365,9 @@ test('POST /convert with no Accept returns Markdown', async () => {
   );
 });
 
-test('POST /convert returns Markdown for Accept: */* and text/markdown', async () => {
+test('GET /articles returns Markdown for Accept: */* and text/markdown', async () => {
   for (const accept of ['*/*', 'text/markdown']) {
-    const response = await convertWith({}, accept);
+    const response = await getArticleWith({}, accept);
 
     assert.equal(response.status, 200, accept);
     assert.match(response.headers['content-type'], /text\/markdown/, accept);
@@ -403,15 +375,15 @@ test('POST /convert returns Markdown for Accept: */* and text/markdown', async (
   }
 });
 
-test('POST /convert returns 406 for unsupported Accept types', async () => {
-  const response = await convertWith({}, 'text/html');
+test('GET /articles returns 406 for unsupported Accept types', async () => {
+  const response = await getArticleWith({}, 'text/html');
 
   assert.equal(response.status, 406);
   assert.equal(response.body.error, 'Not acceptable');
 });
 
-test('POST /convert sets the Vary: Accept header', async () => {
-  const response = await convertWith();
+test('GET /articles sets Vary: Accept', async () => {
+  const response = await getArticleWith();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.vary, /Accept/i);
@@ -423,7 +395,8 @@ test('GET /articles returns Markdown and the s-maxage cache header', async () =>
     async () => {
       const response = await request(buildApp())
         .get('/articles')
-        .query({ url: articleUrl });
+        .query({ url: articleUrl })
+        .set('Accept', 'text/markdown');
 
       assert.equal(response.status, 200);
       assert.match(response.headers['cache-control'], /s-maxage=31536000/);
@@ -434,14 +407,17 @@ test('GET /articles returns Markdown and the s-maxage cache header', async () =>
 });
 
 test('title falls back to Article <id> when Title is missing', async () => {
-  const response = await convertWith({ Title: '', Id: '1986936' });
+  const response = await getArticleWith({
+    Title: '',
+    Id: '1986936',
+  });
 
   assert.equal(response.status, 200);
   assert.equal(response.body.article.title, 'Article 1986936');
 });
 
-test('products and versions appear in article.products and the front matter', async () => {
-  const response = await convertWith({
+test('products and versions appear in article metadata and front matter', async () => {
+  const response = await getArticleWith({
     Id: '1986936',
     Title: 'Product article',
     Products: [
@@ -467,16 +443,22 @@ test('products and versions appear in article.products and the front matter', as
   assert.match(response.body.markdown, /"1\.0"/);
 });
 
-test('createdAt and updatedAt are ISO strings, or null when missing', async () => {
-  const withDates = await convertWith({
+test('createdAt and updatedAt are ISO strings or null', async () => {
+  const withDates = await getArticleWith({
     CreatedTime: 1750797136000,
     LastContentUpdateTime: 1791332026282,
   });
 
-  assert.equal(withDates.body.article.createdAt, new Date(1750797136000).toISOString());
-  assert.equal(withDates.body.article.updatedAt, new Date(1791332026282).toISOString());
+  assert.equal(
+    withDates.body.article.createdAt,
+    new Date(1750797136000).toISOString(),
+  );
+  assert.equal(
+    withDates.body.article.updatedAt,
+    new Date(1791332026282).toISOString(),
+  );
 
-  const withoutDates = await convertWith();
+  const withoutDates = await getArticleWith();
 
   assert.equal(withoutDates.body.article.createdAt, null);
   assert.equal(withoutDates.body.article.updatedAt, null);
@@ -495,8 +477,8 @@ const attachment = (overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
-test('attachments: relative url resolves to the OpenText origin', async () => {
-  const response = await convertWith({
+test('attachments: relative URL resolves to the OpenText origin', async () => {
+  const response = await getArticleWith({
     Attachments: [attachment({ url: '/files/a.pdf' })],
   });
 
@@ -507,9 +489,13 @@ test('attachments: relative url resolves to the OpenText origin', async () => {
   );
 });
 
-test('attachments: same-origin absolute url is kept', async () => {
-  const response = await convertWith({
-    Attachments: [attachment({ url: 'https://my.opentext.com/files/same.pdf' })],
+test('attachments: same-origin absolute URL is kept', async () => {
+  const response = await getArticleWith({
+    Attachments: [
+      attachment({
+        url: 'https://my.opentext.com/files/same.pdf',
+      }),
+    ],
   });
 
   assert.equal(
@@ -518,9 +504,14 @@ test('attachments: same-origin absolute url is kept', async () => {
   );
 });
 
-test('attachments: foreign-origin url becomes null and is not in the Markdown', async () => {
-  const response = await convertWith({
-    Attachments: [attachment({ name: 'foreign.pdf', url: 'https://evil.com/f.pdf' })],
+test('attachments: foreign-origin URL becomes null and is not in Markdown', async () => {
+  const response = await getArticleWith({
+    Attachments: [
+      attachment({
+        name: 'foreign.pdf',
+        url: 'https://evil.com/f.pdf',
+      }),
+    ],
   });
 
   assert.equal(response.status, 200);
@@ -529,11 +520,14 @@ test('attachments: foreign-origin url becomes null and is not in the Markdown', 
   assert.match(response.body.markdown, /foreign\.pdf/);
 });
 
-// Requires the safeAttachmentUrl fix that also checks fileUrl's origin.
 test('attachments: foreign-origin fileUrl becomes null', async () => {
-  const response = await convertWith({
+  const response = await getArticleWith({
     Attachments: [
-      attachment({ name: 'ext.pdf', fileUrl: 'https://evil.com/f.pdf', isExternalAttachment: true }),
+      attachment({
+        name: 'ext.pdf',
+        fileUrl: 'https://evil.com/f.pdf',
+        isExternalAttachment: true,
+      }),
     ],
   });
 
@@ -542,9 +536,14 @@ test('attachments: foreign-origin fileUrl becomes null', async () => {
   assert.doesNotMatch(response.body.markdown, /evil\.com/);
 });
 
-test('attachments: malformed url does not crash the request', async () => {
-  const response = await convertWith({
-    Attachments: [attachment({ name: 'bad.pdf', url: 'http://[bad' })],
+test('attachments: malformed URL does not crash the request', async () => {
+  const response = await getArticleWith({
+    Attachments: [
+      attachment({
+        name: 'bad.pdf',
+        url: 'http://[bad',
+      }),
+    ],
   });
 
   assert.equal(response.status, 200);
@@ -553,31 +552,44 @@ test('attachments: malformed url does not crash the request', async () => {
 });
 
 test('attachments: brackets in the name are escaped in the Markdown link', async () => {
-  const response = await convertWith({
-    Attachments: [attachment({ name: 'a[1].pdf', url: '/files/a.pdf' })],
+  const response = await getArticleWith({
+    Attachments: [
+      attachment({
+        name: 'a[1].pdf',
+        url: '/files/a.pdf',
+      }),
+    ],
   });
 
   assert.match(response.body.markdown, /\[a\\\[1\\\]\.pdf\]\(</);
 });
 
 test('attachments: size is rendered in KB in the Markdown link', async () => {
-  const response = await convertWith({
-    Attachments: [attachment({ url: '/files/a.pdf', size: 2048 })],
+  const response = await getArticleWith({
+    Attachments: [
+      attachment({
+        url: '/files/a.pdf',
+        size: 2048,
+      }),
+    ],
   });
 
   assert.match(response.body.markdown, /\(2\.0 KB\)/);
 });
 
-test('attachments: the Attachments section appears only when attachments exist', async () => {
-  const withAttachments = await convertWith({
+test('attachments section appears only when attachments exist', async () => {
+  const withAttachments = await getArticleWith({
     Attachments: [attachment({ url: '/files/a.pdf' })],
   });
+
   assert.match(withAttachments.body.markdown, /## Attachments/);
 
-  const withoutAttachments = await convertWith({ Attachments: [] });
+  const withoutAttachments = await getArticleWith({ Attachments: [] });
+
   assert.doesNotMatch(withoutAttachments.body.markdown, /## Attachments/);
 
-  const notAnArray = await convertWith({ Attachments: 'nope' });
+  const notAnArray = await getArticleWith({ Attachments: 'nope' });
+
   assert.equal(notAnArray.status, 200);
   assert.doesNotMatch(notAnArray.body.markdown, /## Attachments/);
 });
@@ -587,13 +599,13 @@ test('attachments: the Attachments section appears only when attachments exist',
 /* -------------------------------------------------------------------------- */
 
 test(
-  'live: real article 1986936 converts to Markdown',
+  'live: real article 1986936 returns JSON with converted Markdown',
   { skip: !process.env.LIVE, timeout: 20000 },
   async () => {
     const response = await request(buildApp())
-      .post('/convert')
-      .set('Accept', 'application/json')
-      .send({ url: articleUrl });
+      .get('/articles')
+      .query({ url: articleUrl })
+      .set('Accept', 'application/json');
 
     assert.equal(response.status, 200);
     assert.equal(response.body.article.id, '1986936');
