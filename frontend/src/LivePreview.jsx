@@ -65,6 +65,7 @@ function formatTimeAgo(value, now = Date.now()) {
 export default function LivePreview() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [markdown, setMarkdown] = useState('');
+  const [convertedUrl, setConvertedUrl] = useState('');
   const [raw, setRaw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -89,9 +90,8 @@ export default function LivePreview() {
     setError('');
     setNotice('');
     setApiKey('');
-    setMarkdown('');
-    setFetchedAt('');
 
+    // Keep the current article visible when generating another key.
     try {
       const res = await fetch('/api/v1/generate-key', {
         method: 'POST',
@@ -131,8 +131,15 @@ export default function LivePreview() {
   };
 
   const fetchArticle = async (forceRefresh = false) => {
+    const requestedUrl = url.trim();
+
     if (!apiKey) {
       setError('Generate temporary access before converting an article.');
+      return;
+    }
+
+    if (!requestedUrl) {
+      setError('Enter an article URL before converting.');
       return;
     }
 
@@ -141,19 +148,24 @@ export default function LivePreview() {
     setNotice('');
 
     try {
-      const params = new URLSearchParams({ url: url.trim() });
+      const params = new URLSearchParams({
+        url: requestedUrl,
+      });
 
       if (forceRefresh) {
         params.set('forceRefresh', 'true');
       }
 
-      const res = await fetch(`/api/v1/articles?${params.toString()}`, {
-        method: 'GET',
-        headers: {
-          'x-api-key': apiKey,
-          Accept: 'text/markdown',
+      const res = await fetch(
+        `/api/v1/articles?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+            Accept: 'text/markdown',
+          },
         },
-      });
+      );
 
       const text = await res.text();
 
@@ -175,22 +187,19 @@ export default function LivePreview() {
         throw new Error(message);
       }
 
-      // A successful response becomes the currently displayed article.
+      // Commit the new article only after a successful response.
       setMarkdown(text);
-      setRaw(false);
+      setConvertedUrl(requestedUrl);
       setFetchedAt(res.headers.get('x-article-fetched-at') || '');
+      setRaw(false);
+
       setNotice(
         forceRefresh
           ? 'Article refreshed successfully.'
           : 'Article converted successfully.',
       );
     } catch (err) {
-      // Keep the existing preview and timestamp if a refresh fails.
-      if (!forceRefresh) {
-        setMarkdown('');
-        setFetchedAt('');
-      }
-
+      // Never erase the previous successful article on failure.
       setError(
         err instanceof Error
           ? err.message
@@ -207,17 +216,89 @@ export default function LivePreview() {
   };
 
   const refreshArticle = async () => {
-    await fetchArticle(true);
+    // Refresh the article currently displayed, not an unconverted URL
+    // that may have been entered into the input.
+    if (!convertedUrl) return;
+
+    const currentInput = url;
+    setUrl(convertedUrl);
+
+    try {
+      await fetchArticleForUrl(convertedUrl, true);
+    } finally {
+      // Keep the user's typed URL so they can continue editing it.
+      setUrl(currentInput);
+    }
+  };
+
+  const fetchArticleForUrl = async (requestedUrl, forceRefresh = false) => {
+    if (!apiKey) {
+      setError('Generate temporary access before converting an article.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const params = new URLSearchParams({ url: requestedUrl });
+
+      if (forceRefresh) {
+        params.set('forceRefresh', 'true');
+      }
+
+      const res = await fetch(
+        `/api/v1/articles?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+            Accept: 'text/markdown',
+          },
+        },
+      );
+
+      const text = await res.text();
+
+      if (!res.ok) {
+        let message = 'Failed to refresh article.';
+
+        try {
+          message = JSON.parse(text).message ?? message;
+        } catch {
+          // Keep the default message.
+        }
+
+        if (res.status === 401 || res.status === 403) {
+          setApiKey('');
+          message =
+            'Temporary access expired or is invalid. Generate a new key.';
+        }
+
+        throw new Error(message);
+      }
+
+      setMarkdown(text);
+      setConvertedUrl(requestedUrl);
+      setFetchedAt(res.headers.get('x-article-fetched-at') || '');
+      setRaw(false);
+      setNotice('Article refreshed successfully.');
+    } catch (err) {
+      // Preserve the previous content and timestamp.
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to refresh article.',
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUrlChange = (event) => {
-    const nextUrl = event.target.value;
-    setUrl(nextUrl);
-
-    // Do not show the previous article or its timestamp for a new URL.
-    setMarkdown('');
-    setFetchedAt('');
-    setRaw(false);
+    // Editing the input must not clear the last converted article.
+    setUrl(event.target.value);
     setError('');
     setNotice('');
   };
@@ -296,10 +377,7 @@ export default function LivePreview() {
               : [];
 
             return (
-              <div
-                key={`${key}-${productId}`}
-                className="metadata-group"
-              >
+              <div key={`${key}-${productId}`} className="metadata-group">
                 <div className="metadata-subheader">
                   <span>{productName}</span>
                   <small>{productId}</small>
@@ -543,6 +621,7 @@ export default function LivePreview() {
 
             <p className="field-hint">
               Enter the full URL of the support article you want to convert.
+              
             </p>
           </form>
         </section>
@@ -585,11 +664,11 @@ export default function LivePreview() {
             <span className="loading-spinner" />
             <div>
               <strong>
-                {markdown ? 'Refreshing your article' : 'Converting your article'}
+                {markdown ? 'Updating article' : 'Converting your article'}
               </strong>
               <p>
                 {markdown
-                  ? 'Fetching the latest source content…'
+                  ? 'Your current preview stays available while the request completes…'
                   : 'Fetching the source content and generating Markdown…'}
               </p>
             </div>
@@ -633,28 +712,7 @@ export default function LivePreview() {
 
         {markdown && (
           <section className="preview-results">
-            <div className="results-heading">
-              <div className="results-title">
-                <div className="converter-step">02</div>
-                <div>
-                  <h2>Converted article</h2>
-                  <p>Your Markdown is ready to inspect or export.</p>
-                </div>
-              </div>
-
-              <div className="results-badges">
-                <span className="result-badge">
-                  <span className="result-badge-dot" />
-                  Markdown ready
-                </span>
-                {attachmentCount > 0 && (
-                  <span className="result-badge">
-                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
-                  </span>
-                )}
-              </div>
-            </div>
-
+            {/* Last refreshed appears before section 02. */}
             <div className="access-row article-refresh-row">
               <div className="access-indicator">
                 <span className="access-indicator-dot is-ready" />
@@ -673,7 +731,7 @@ export default function LivePreview() {
                 className="secondary-button access-button"
                 onClick={refreshArticle}
                 disabled={!apiKey || loading || generatingKey}
-                title="Fetch the latest article and invalidate its cached response"
+                title="Fetch the latest version of the currently displayed article"
               >
                 {loading ? (
                   <>
@@ -684,6 +742,30 @@ export default function LivePreview() {
                   '↻ Refresh article'
                 )}
               </button>
+            </div>
+
+            <div className="results-heading">
+              <div className="results-title">
+                <div className="converter-step">02</div>
+                <div>
+                  <h2>Converted article</h2>
+                  <p>
+                    {convertedUrl || 'Your Markdown'} is ready to inspect or export.
+                  </p>
+                </div>
+              </div>
+
+              <div className="results-badges">
+                <span className="result-badge">
+                  <span className="result-badge-dot" />
+                  Markdown ready
+                </span>
+                {attachmentCount > 0 && (
+                  <span className="result-badge">
+                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="preview-layout">
