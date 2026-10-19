@@ -8,7 +8,7 @@ Convert OpenText support articles into Markdown or JSON using a React interface 
 
 | Item | Assumption / scope |
 |---|---|
-| API-key authentication | **Assumed** OpenText article access might require API-key protection, so an API key was added to this converter's article endpoint. This key protects the converter; it **does not authenticate users to OpenText** or bypass OpenText login restrictions. |
+| API-key authentication | Only the three supplied OpenText support articles were accessible during testing. Since other articles were inaccessible, I assumed they might be access-restricted. Based on this assumption, I implemented API-key authentication to protect the converter's article endpoint. The API key controls access to the converter itself; it does not grant access to restricted OpenText articles or bypass OpenText authentication. |
 | Hosting | Assumed deployment to a hyperscaler serverless platform with CDN caching; AWS was selected for this implementation. |
 | Workload | Assumed stateless, on-demand article conversions, making Lambda preferable to operating a Kubernetes cluster for this assessment. |
 | Article availability | Only the **three supplied sample articles** were tested successfully; other articles were inaccessible. |
