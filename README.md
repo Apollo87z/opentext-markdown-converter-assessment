@@ -126,7 +126,36 @@ cd ../frontend && npm ci && npm test --if-present && npm run build
 
 CI runs these checks automatically. `npm test --if-present` means frontend CI can pass when no frontend test script exists.
 
-### Performance validation (proposed)
+### Performance validation
+### Performance validation — AWS EC2 and k6
+
+Performance testing was conducted using **Grafana k6 v2.3.0** on an Amazon Linux 2023 EC2 instance (`x86_64`) in AWS `us-east-2`, targeting the deployed CloudFront distribution.
+
+The test simulated increasing traffic across three OpenText support articles using two API keys, with a target load of up to **1,000 requests per second**. A separate scenario periodically tested the `forceRefresh=true` endpoint.
+
+#### k6 stress-test results
+
+![OpenText Markdown Converter — k6 performance metrics](Performance/Performance_Metrics.png)
+
+**Key observations:**
+
+- **144,386 HTTP requests** completed with a 100% success rate.
+- **5.09 ms p95 response latency**, with an average of 4.70 ms.
+- **99.99% observed CloudFront cache-hit rate**.
+- **0 HTTP failures** and **0 server errors**.
+- **433,158 validation checks passed**.
+- **7/7 cache-refresh checks passed**, confirming successful HTTP responses but not independently verifying cache invalidation.
+- **159 dropped iterations**, exceeding the configured zero-drop threshold.
+
+#### CloudWatch monitoring
+
+AWS CloudWatch recorded **610.85 RPS** during one sampled minute, with a **99.99% CloudFront cache-hit rate**, zero observed 4xx/5xx errors, and low Lambda invocation volume.
+
+#### Conclusion
+
+The results demonstrate strong scalability for **read-heavy, cacheable workloads**, with CloudFront serving most repeated requests without invoking the backend.
+
+Although the test targeted 1,000 RPS, sustained throughput at that level was not established. Further testing with uncached articles, concurrent conversions, and geographically distributed clients is needed to validate broader production scalability.
 
 
 
