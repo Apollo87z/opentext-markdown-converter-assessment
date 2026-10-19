@@ -8,89 +8,117 @@ const API_KEY = 'YOUR_API_KEY';
 function TokenizedCode({ code }) {
   const rendered = useMemo(() => {
     const pattern =
-      /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\/[^\n]*|#[^\n]*|\b(?:true|false|null)\b|\b(?:const|let|var|await|async|import|from|return|if|else|for|while|try|catch|class|def|print|curl|GET|POST|Accept|Content-Type|application|json)\b|\b\d+(?:\.\d+)?\b|[{}\[\]():,])|(\s+)|(\S+)/g;
+      /(\/\/[^\n]*|#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|\b(?:const|let|var|async|await|return|function|import|from|export|default|if|else|new|throw|try|catch)\b|[{}()[\].,:;])/g;
 
-    const segments = [];
+    const tokens = [];
+    let lastIndex = 0;
     let match;
 
     while ((match = pattern.exec(code)) !== null) {
-      const token = match[0];
-      let className = 'token-default';
-
-      if (match[2]) {
-        className = 'token-plain';
-      } else if (/^(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)$/.test(token)) {
-        className = 'token-string';
-      } else if (/^(?:true|false|null)$/.test(token)) {
-        className = 'token-boolean';
-      } else if (/^\d+(?:\.\d+)?$/.test(token)) {
-        className = 'token-number';
-      } else if (/^(?:\/\/[^\n]*|#[^\n]*)$/.test(token)) {
-        className = 'token-comment';
-      } else if (/^(?:const|let|var|await|async|import|from|return|if|else|for|while|try|catch|class|def|print|curl|GET|POST|Accept|Content-Type|application|json)$/.test(token)) {
-        className = 'token-keyword';
-      } else if (/^[{}\[\]():,]$/.test(token)) {
-        className = 'token-punctuation';
+      if (match.index > lastIndex) {
+        tokens.push({
+          text: code.slice(lastIndex, match.index),
+          type: 'plain',
+        });
       }
 
-      segments.push(
-        <span key={`token-${match.index}`} className={className}>
-          {token}
-        </span>,
-      );
+      const value = match[0];
+      let type = 'punctuation';
+
+      if (/^(\/\/|#)/.test(value)) type = 'comment';
+      else if (/^["']/.test(value)) type = 'string';
+      else if (/^(true|false|null|undefined)$/.test(value)) {
+        type = 'boolean';
+      } else if (/^\d/.test(value)) {
+        type = 'number';
+      } else if (
+        /^(const|let|var|async|await|return|function|import|from|export|default|if|else|new|throw|try|catch)$/.test(
+          value,
+        )
+      ) {
+        type = 'keyword';
+      }
+
+      tokens.push({ text: value, type });
+      lastIndex = pattern.lastIndex;
     }
 
-    return segments;
+    if (lastIndex < code.length) {
+      tokens.push({
+        text: code.slice(lastIndex),
+        type: 'plain',
+      });
+    }
+
+    return tokens;
   }, [code]);
 
-  return <code className="code-content">{rendered}</code>;
+  return (
+    <code className="code-content">
+      {rendered.map((token, index) => (
+        <span
+          className={`token-${token.type}`}
+          key={`${index}-${token.text.slice(0, 8)}`}
+        >
+          {token.text}
+        </span>
+      ))}
+    </code>
+  );
 }
 
 function CodeExamplePanel({ examples, id }) {
-  const [activeLanguage, setActiveLanguage] = useState(
-    examples[0]?.language ?? 'bash',
+  const [activeTab, setActiveTab] = useState(
+    examples[0]?.label ?? 'cURL',
   );
   const [copied, setCopied] = useState(false);
 
   const activeExample =
-    examples.find((example) => example.language === activeLanguage) ??
+    examples.find((example) => example.label === activeTab) ??
     examples[0];
 
-  const handleCopy = async () => {
-    if (!activeExample) return;
-
+  async function copyCode() {
     try {
       await navigator.clipboard.writeText(activeExample.code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      setCopied(false);
-    }
-  };
+      const textArea = document.createElement('textarea');
+      textArea.value = activeExample.code;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
 
-  if (!activeExample) return null;
+      try {
+        document.execCommand('copy');
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      } finally {
+        textArea.remove();
+      }
+    }
+  }
 
   return (
-    <div className="docs-code-panel">
+    <div className="docs-code-panel" id={id}>
       <div className="docs-code-toolbar">
         <div
           className="docs-code-tabs"
           role="tablist"
-          aria-label="Code examples"
+          aria-label="Code example language"
         >
           {examples.map((example) => (
             <button
-              key={example.language}
-              id={`${id}-tab-${example.language}`}
+              className={`docs-tab${
+                activeTab === example.label ? ' active' : ''
+              }`}
+              key={example.label}
               type="button"
               role="tab"
-              aria-selected={activeLanguage === example.language}
-              aria-controls={`${id}-panel-${example.language}`}
-              className={`docs-tab ${
-                activeLanguage === example.language ? 'active' : ''
-              }`}
+              aria-selected={activeTab === example.label}
               onClick={() => {
-                setActiveLanguage(example.language);
+                setActiveTab(example.label);
                 setCopied(false);
               }}
             >
@@ -100,147 +128,159 @@ function CodeExamplePanel({ examples, id }) {
         </div>
 
         <button
-          type="button"
           className="docs-copy-button"
-          onClick={handleCopy}
-          aria-label="Copy code example"
+          type="button"
+          onClick={copyCode}
         >
-          {copied ? 'Copied!' : 'Copy code'}
+          {copied ? 'Copied' : 'Copy code'}
         </button>
       </div>
 
-      <div
-        id={`${id}-panel-${activeExample.language}`}
+      <pre
         className="docs-code-container"
-        role="tabpanel"
-        aria-labelledby={`${id}-tab-${activeExample.language}`}
+        aria-label={`${activeExample.label} example`}
       >
         <TokenizedCode code={activeExample.code} />
-      </div>
+      </pre>
     </div>
   );
 }
 
+function MethodBadge({ method }) {
+  return (
+    <span
+      className={`docs-method docs-method-${method.toLowerCase()}`}
+    >
+      {method}
+    </span>
+  );
+}
+
 export default function Docs() {
-  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedBaseUrl, setCopiedBaseUrl] = useState(false);
 
   const sections = [
     { id: 'overview', label: 'Overview' },
-    { id: 'health', label: 'GET /api/v1/health' },
-    { id: 'articles', label: 'GET /api/v1/articles' },
-    { id: 'generate-key', label: 'POST /api/v1/generate-key' },
+    { id: 'health', label: 'Health check' },
+    { id: 'articles', label: 'Convert article' },
+    { id: 'generate-key', label: 'Generate API key' },
     { id: 'errors', label: 'Errors' },
   ];
 
-  const navigateToSection = (event, sectionId) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    document.getElementById(sectionId)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  };
-
-  const handleCopyUrl = async () => {
+  async function copyBaseUrl() {
     try {
       await navigator.clipboard.writeText(API_BASE_URL);
-      setCopiedUrl(true);
-      window.setTimeout(() => setCopiedUrl(false), 1500);
+      setCopiedBaseUrl(true);
+      window.setTimeout(() => setCopiedBaseUrl(false), 1600);
     } catch {
-      setCopiedUrl(false);
+      setCopiedBaseUrl(false);
     }
-  };
+  }
+
+  function navigateToSection(event, id) {
+    event.preventDefault();
+
+    document
+      .getElementById(id)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    window.history.replaceState(null, '', `#${id}`);
+  }
 
   const healthExamples = [
     {
-      language: 'bash',
       label: 'cURL',
-      code: `curl -X GET "${API_BASE_URL}/api/v1/health"`,
+      code: `curl -i ${API_BASE_URL}/api/v1/health`,
     },
     {
-      language: 'json',
-      label: 'JSON Output',
-      code: '{\n  "status": "ok"\n}',
+      label: 'JavaScript',
+      code: `const response = await fetch('${API_BASE_URL}/api/v1/health');
+const data = await response.json();
+
+console.log(data);`,
+    },
+    {
+      label: 'JSON',
+      code: `{
+  "status": "ok"
+}`,
     },
   ];
 
   const articleExamples = [
     {
-      language: 'bash-markdown',
       label: 'cURL · Markdown',
-      code: `curl -G "${API_BASE_URL}/api/v1/articles" \\
+      code: `curl -sS -G "${API_BASE_URL}/api/v1/articles" \\
   --data-urlencode "url=${ARTICLE_URL}" \\
   -H "x-api-key: ${API_KEY}" \\
   -H "Accept: text/markdown"`,
     },
     {
-      language: 'bash-json',
       label: 'cURL · JSON',
-      code: `curl -i -G "${API_BASE_URL}/api/v1/articles" \\
+      code: `curl -sS -G "${API_BASE_URL}/api/v1/articles" \\
   --data-urlencode "url=${ARTICLE_URL}" \\
   -H "x-api-key: ${API_KEY}" \\
   -H "Accept: application/json"`,
     },
     {
-      language: 'bash-cache-age',
-      label: 'cURL · Cache Age',
-      code: `curl -sS -D - -o /dev/null -G "${API_BASE_URL}/api/v1/articles" \\
-  --data-urlencode "url=${ARTICLE_URL}" \\
-  -H "x-api-key: ${API_KEY}" \\
-  -H "Accept: application/json" \\
-  | grep -i "^age:"`,
+      label: 'JavaScript',
+      code: `const params = new URLSearchParams({
+  url: '${ARTICLE_URL}',
+});
+
+const response = await fetch(
+  '${API_BASE_URL}/api/v1/articles?' + params,
+  {
+    headers: {
+      'x-api-key': '${API_KEY}',
+      Accept: 'text/markdown',
+    },
+  },
+);
+
+if (!response.ok) {
+  throw new Error(\`Request failed: \${response.status}\`);
+}
+
+const markdown = await response.text();
+console.log(markdown);`,
     },
     {
-      language: 'bash-force-refresh',
-      label: 'Force Refresh',
-      code: `curl -G "${API_BASE_URL}/api/v1/articles" \\
+      label: 'Python',
+      code: `import requests
+
+response = requests.get(
+    '${API_BASE_URL}/api/v1/articles',
+    params={'url': '${ARTICLE_URL}'},
+    headers={
+        'x-api-key': '${API_KEY}',
+        'Accept': 'text/markdown',
+    },
+    timeout=30,
+)
+response.raise_for_status()
+print(response.text)`,
+    },
+    {
+      label: 'JSON Output',
+      code: `{
+  "url": "${ARTICLE_URL}",
+  "title": "Example OpenText support article",
+  "markdown": "# Example article\\n\\nConverted article content and attachment links..."
+}`,
+    },
+    {
+      label: 'cURL · Force refresh',
+      code: `curl -sS -G "${API_BASE_URL}/api/v1/articles" \\
   --data-urlencode "url=${ARTICLE_URL}" \\
   --data-urlencode "forceRefresh=true" \\
   -H "x-api-key: ${API_KEY}" \\
-  -H "Accept: application/json"`,
+  -H "Accept: text/markdown"`,
     },
     {
-      language: 'javascript',
-      label: 'JavaScript',
-      code: `const articleUrl = '${ARTICLE_URL}';
-
-const params = new URLSearchParams({
-  url: articleUrl,
-});
-
-const response = await fetch(
-  '${API_BASE_URL}/api/v1/articles?' + params,
-  {
-    headers: {
-      'x-api-key': '${API_KEY}',
-      Accept: 'application/json',
-    },
-  },
-);
-
-if (!response.ok) {
-  throw new Error('Request failed: ' + response.status);
-}
-
-const age = response.headers.get('Age');
-
-console.log(
-  age === null
-    ? 'Cache age is unavailable'
-    : 'Article cached for ' + age + ' seconds',
-);
-
-const data = await response.json();
-console.log(data.article.title);
-console.log(data.markdown);`,
-    },
-    {
-      language: 'javascript-force-refresh',
-      label: 'JavaScript · Force Refresh',
+      label: 'JavaScript · JSON',
       code: `const params = new URLSearchParams({
   url: '${ARTICLE_URL}',
-  forceRefresh: 'true',
 });
 
 const response = await fetch(
@@ -254,16 +294,14 @@ const response = await fetch(
 );
 
 if (!response.ok) {
-  throw new Error('Request failed: ' + response.status);
+  throw new Error(\`Request failed: \${response.status}\`);
 }
 
-const data = await response.json();
-console.log(data.article.title);
-console.log(data.markdown);`,
+const article = await response.json();
+console.log(article.markdown);`,
     },
     {
-      language: 'python',
-      label: 'Python',
+      label: 'Python · JSON',
       code: `import requests
 
 response = requests.get(
@@ -277,385 +315,25 @@ response = requests.get(
 )
 response.raise_for_status()
 
-age = response.headers.get('Age')
-if age is not None:
-    print(f'Article cached for {age} seconds')
-else:
-    print('Cache age is unavailable')
-
-data = response.json()
-print(data['article']['title'])
-print(data['markdown'])`,
-    },
-    {
-      language: 'json',
-      label: 'JSON Output',
-      code: `{
-  "status": "success",
-  "sourceUrl": "${ARTICLE_URL}",
-  "contentType": "text/markdown",
-  "article": {
-    "id": "1986936",
-    "title": "Example article",
-    "type": "Article",
-    "views": 42,
-    "createdAt": null,
-    "updatedAt": null,
-    "products": [],
-    "attachments": [],
-    "relatedArticles": []
-  },
-  "markdown": "---\\nstatus: success\\n---\\n\\n# Example article"
-}`,
-    },
-    {
-      language: 'markdown',
-      label: 'Markdown Output',
-      code: `---
-status: success
-id: "1986936"
-title: "Example article"
-type: "Article"
-views: 42
-createdAt: null
-updatedAt: null
-sourceUrl: "${ARTICLE_URL}"
-products: []
-attachments: []
----
-
-# Example article
-
-Example Markdown content`,
+article = response.json()
+print(article['markdown'])`,
     },
   ];
 
-  const keyExamples = [
+  const cacheAgeExamples = [
     {
-      language: 'bash',
       label: 'cURL',
-      code: `curl -X POST "${API_BASE_URL}/api/v1/generate-key"`,
-    },
-    {
-      language: 'javascript',
-      label: 'JavaScript',
-      code: `const response = await fetch('${API_BASE_URL}/api/v1/generate-key', {
-  method: 'POST',
-});
-
-if (!response.ok) {
-  throw new Error('Request failed: ' + response.status);
-}
-
-const data = await response.json();
-console.log(data.apiKey);`,
-    },
-    {
-      language: 'python',
-      label: 'Python',
-      code: `import requests
-
-response = requests.post(
-    '${API_BASE_URL}/api/v1/generate-key',
-    timeout=30,
-)
-response.raise_for_status()
-print(response.json()['apiKey'])`,
-    },
-    {
-      language: 'json',
-      label: 'JSON Output',
-      code: '{\n  "apiKey": "<example-api-key>"\n}',
-    },
-  ];
-
-  const errorExamples = [
-    {
-      language: 'json',
-      label: '400 Example',
-      code: '{\n  "status": "error",\n  "error": "Validation failed",\n  "message": "Please provide a valid article URL."\n}',
-    },
-    {
-      language: 'json-404',
-      label: '404 Example',
-      code: '{\n  "status": "error",\n  "error": "Route not found",\n  "message": "Route not found"\n}',
-    },
-    {
-      language: 'json-502',
-      label: '502 Example',
-      code: '{\n  "status": "error",\n  "error": "Bad gateway",\n  "message": "Failed to load article."\n}',
-    },
-  ];
-
-  return (
-    <main className="docs-page">
-      <div className="container docs-layout">
-        <aside className="docs-sidebar">
-          <nav className="docs-nav" aria-label="Docs navigation">
-            {sections.map((section) => (
-              <a
-                key={section.id}
-                href={`#${section.id}`}
-                className="docs-link"
-                onClick={(event) => navigateToSection(event, section.id)}
-              >
-                {section.label}
-              </a>
-            ))}
-          </nav>
-        </aside>
-
-        <div className="docs-content">
-          <section id="overview" className="docs-section">
-            <div className="docs-intro">
-              <p className="docs-eyebrow">API REFERENCE</p>
-              <h1>OpenText Markdown Converter</h1>
-              <p className="docs-description">
-                Retrieve OpenText support articles as Markdown or structured
-                JSON for applications and AI agents.
-              </p>
-            </div>
-
-            <div className="docs-api-url">
-              <div className="docs-api-url-heading">
-                <div>
-                  <strong>Base URL</strong>
-                  <p>Use this URL to access the API endpoints.</p>
-                </div>
-                <span className="docs-api-status">
-                  <span className="docs-api-status-dot" />
-                  API
-                </span>
-              </div>
-
-              <div className="docs-api-url-value">
-                <code>{API_BASE_URL}</code>
-                <button
-                  type="button"
-                  className="docs-copy-button"
-                  onClick={handleCopyUrl}
-                >
-                  {copiedUrl ? 'Copied!' : 'Copy URL'}
-                </button>
-              </div>
-            </div>
-
-            <div className="docs-endpoints">
-              <div className="docs-endpoints-heading">
-                <div>
-                  <h2>Endpoints</h2>
-                  <p>Available API operations</p>
-                </div>
-                <span className="docs-endpoint-count">3 endpoints</span>
-              </div>
-
-              <table className="docs-route-table">
-                <thead>
-                  <tr>
-                    <th>Method</th>
-                    <th>Endpoint</th>
-                    <th>Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['GET', 'health', '/api/v1/health', 'Check service health.'],
-                    ['GET', 'articles', '/api/v1/articles', 'Retrieve an article as JSON or Markdown.'],
-                    ['POST', 'generate-key', '/api/v1/generate-key', 'Request an API key.'],
-                  ].map(([method, id, path, description]) => (
-                    <tr key={id}>
-                      <td>
-                        <span
-                          className={`docs-method docs-method-${method.toLowerCase()}`}
-                        >
-                          {method}
-                        </span>
-                      </td>
-                      <td>
-                        <a
-                          className="docs-endpoint-link"
-                          href={`#${id}`}
-                          onClick={(event) => navigateToSection(event, id)}
-                        >
-                          <code>{path}</code>
-                        </a>
-                      </td>
-                      <td>{description}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="docs-auth-notice">
-              <h2>API authentication</h2>
-              <p>
-                The articles endpoint requires an API key. Include your key
-                in the <code>x-api-key</code> request header. Requests without
-                a valid key receive HTTP <code>401</code>.
-              </p>
-              <p>
-                The health endpoint remains public. Do not put API keys in
-                URLs or commit real keys to source control.
-              </p>
-              <p>
-                Replace <code>YOUR_API_KEY</code> in the examples with your
-                actual key.
-              </p>
-            </div>
-          </section>
-
-          <section id="health" className="docs-section">
-            <div className="docs-section-header">
-              <div>
-                <p className="docs-eyebrow">Endpoint · Public</p>
-                <h2>GET /api/v1/health</h2>
-              </div>
-            </div>
-            <p>
-              Returns the application status as JSON. No API key is required.
-            </p>
-            <CodeExamplePanel id="health" examples={healthExamples} />
-          </section>
-
-          <section id="articles" className="docs-section">
-            <div className="docs-section-header">
-              <div>
-                <p className="docs-eyebrow">Endpoint · Authentication required</p>
-                <h2>GET /api/v1/articles</h2>
-              </div>
-            </div>
-
-            <p>
-              Retrieves an OpenText support article using the required{' '}
-              <code>url</code> query parameter. Set the <code>Accept</code>{' '}
-              header to choose the response format.
-            </p>
-
-            <ul>
-              <li>
-                <strong>Authentication:</strong> <code>x-api-key</code> header
-              </li>
-              <li>
-                <strong>Required query parameter:</strong> <code>url</code> — an
-                OpenText support article URL
-              </li>
-              <li>
-                <strong>Optional query parameter:</strong>{' '}
-                <code>forceRefresh=true</code> — requests a fresh article and
-                triggers the backend cache-invalidation workflow.
-              </li>
-              <li>
-                <strong>Markdown:</strong> <code>Accept: text/markdown</code>
-              </li>
-              <li>
-                <strong>JSON:</strong> <code>Accept: application/json</code>
-              </li>
-              <li>
-                <strong>Default:</strong> Markdown when the header is omitted
-                or accepts <code>*/*</code>.
-              </li>
-              <li>
-                <strong>Unsupported format:</strong> HTTP <code>406</code>.
-              </li>
-              <li>
-                <strong>Example article:</strong> <code>{ARTICLE_URL}</code>
-              </li>
-            </ul>
-
-            <h3>Response formats</h3>
-            <p>
-              Markdown responses contain article front matter, converted
-              article content, and attachment links. JSON responses contain
-              the article metadata and a <code>markdown</code> field with the
-              converted content.
-            </p>
-
-            <h3>Cache behavior</h3>
-            <p>
-              Article responses are cached by CloudFront to reduce repeated
-              upstream requests and improve response times.
-            </p>
-
-            <ul>
-              <li>
-                <strong>Normal request:</strong> A cached response can be
-                returned when available. The configured shared-cache lifetime
-                is 24 hours.
-              </li>
-              <li>
-                <strong>Cache age:</strong> Read the CloudFront <code>Age</code>{' '}
-                response header to see how many seconds the response has been
-                cached. For example, <code>Age: 3600</code> means the cached
-                response is approximately one hour old. This is cache age, not
-                the article's publication or update time.
-              </li>
-              <li>
-                <strong>Force refresh:</strong> Add <code>forceRefresh=true</code>{' '}
-                to request a fresh article. The backend runs its refresh and
-                cache-invalidation workflow.
-              </li>
-              <li>
-                <strong>After refreshing:</strong> The next normal request may
-                initially miss the cache while CloudFront retrieves and caches
-                the refreshed response.
-              </li>
-              <li>
-                <strong>Normal response header:</strong>{' '}
-                <code>Cache-Control: public, max-age=0, s-maxage=86400</code>.
-              </li>
-              <li>
-                <strong>Force-refresh response header:</strong>{' '}
-                <code>Cache-Control: no-store</code>.
-              </li>
-            </ul>
-
-            <h3>Read the cache age</h3>
-            <p>
-              Use the <code>Age</code> response header to check the age of a
-              cached response. It may be absent on a cache miss. In browsers,
-              the API must expose the header through CORS using{' '}
-              <code>Access-Control-Expose-Headers: Age</code>.
-            </p>
-
-            <CodeExamplePanel
-              id="articles"
-              examples={[
-                articleExamples[0],
-                articleExamples[1],
-                articleExamples[2],
-                articleExamples[3],
-                articleExamples[4],
-                articleExamples[5],
-                articleExamples[6],
-                articleExamples[7],
-              ]}
-            />
-
-            <h3>Cache age examples</h3>
-            <p>
-              These examples read the response header. Replace{' '}
-              <code>YOUR_API_KEY</code> with your API key.
-            </p>
-
-            <CodeExamplePanel
-              id="cache-age"
-              examples={[
-                {
-                  language: 'bash',
-                  label: 'cURL',
-                  code: `curl -sS -D - -o /dev/null -G "${API_BASE_URL}/api/v1/articles" \\
+      code: `curl -sS -D - -o /dev/null -G "${API_BASE_URL}/api/v1/articles" \\
   --data-urlencode "url=${ARTICLE_URL}" \\
   -H "x-api-key: ${API_KEY}" \\
   -H "Accept: application/json" \\
   | grep -i "^age:"`,
-                },
-                {
-                  language: 'javascript',
-                  label: 'JavaScript',
-                  code: `const response = await fetch(
-  '${API_BASE_URL}/api/v1/articles?url=' +
-    encodeURIComponent('${ARTICLE_URL}'),
+    },
+    {
+      label: 'JavaScript',
+      code: `const response = await fetch(
+  '${API_BASE_URL}/api/v1/articles?' +
+    new URLSearchParams({ url: '${ARTICLE_URL}' }),
   {
     headers: {
       'x-api-key': '${API_KEY}',
@@ -671,11 +349,10 @@ console.log(
     ? 'Cache age is unavailable'
     : 'Article cached for ' + age + ' seconds',
 );`,
-                },
-                {
-                  language: 'python',
-                  label: 'Python',
-                  code: `import requests
+    },
+    {
+      label: 'Python',
+      code: `import requests
 
 response = requests.get(
     '${API_BASE_URL}/api/v1/articles',
@@ -694,70 +371,705 @@ print(
     if age is not None
     else 'Cache age is unavailable'
 )`,
-                },
-                {
-                  language: 'text',
-                  label: 'Example Header',
-                  code: `HTTP/2 200
+    },
+    {
+      label: 'Example Header',
+      code: `HTTP/2 200
 content-type: application/json
 cache-control: public, max-age=0, s-maxage=86400
 age: 3600`,
-                },
-              ]}
+    },
+  ];
+
+  const refreshExamples = [
+    {
+      label: 'cURL',
+      code: `curl -sS -G "${API_BASE_URL}/api/v1/articles" \\
+  --data-urlencode "url=${ARTICLE_URL}" \\
+  --data-urlencode "forceRefresh=true" \\
+  -H "x-api-key: ${API_KEY}" \\
+  -H "Accept: text/markdown"`,
+    },
+    {
+      label: 'JavaScript',
+      code: `const params = new URLSearchParams({
+  url: '${ARTICLE_URL}',
+  forceRefresh: 'true',
+});
+
+const response = await fetch(
+  '${API_BASE_URL}/api/v1/articles?' + params,
+  {
+    headers: {
+      'x-api-key': '${API_KEY}',
+      Accept: 'text/markdown',
+    },
+  },
+);
+
+if (!response.ok) {
+  throw new Error(\`Request failed: \${response.status}\`);
+}
+
+const markdown = await response.text();
+console.log(markdown);`,
+    },
+    {
+      label: 'Python',
+      code: `import requests
+
+response = requests.get(
+    '${API_BASE_URL}/api/v1/articles',
+    params={
+        'url': '${ARTICLE_URL}',
+        'forceRefresh': 'true',
+    },
+    headers={
+        'x-api-key': '${API_KEY}',
+        'Accept': 'text/markdown',
+    },
+    timeout=30,
+)
+response.raise_for_status()
+print(response.text)`,
+    },
+  ];
+
+  const keyExamples = [
+    {
+      label: 'cURL',
+      code: `curl -X POST '${API_BASE_URL}/api/v1/generate-key' \\
+  -H 'Content-Type: application/json' \\
+  -d '{}'`,
+    },
+    {
+      label: 'JavaScript',
+      code: `const response = await fetch(
+  '${API_BASE_URL}/api/v1/generate-key',
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  },
+);
+
+const result = await response.json();
+console.log(result);`,
+    },
+    {
+      label: 'Python',
+      code: `import requests
+
+response = requests.post(
+    '${API_BASE_URL}/api/v1/generate-key',
+    json={},
+    timeout=30,
+)
+response.raise_for_status()
+print(response.json())`,
+    },
+    {
+      label: 'JSON',
+      code: `{
+  "apiKey": "YOUR_API_KEY"
+}`,
+    },
+  ];
+
+  const errorExamples = [
+    {
+      label: 'JSON',
+      code: `{
+  "error": "Bad Request",
+  "message": "The url query parameter is required"
+}`,
+    },
+  ];
+
+  return (
+    <main className="docs-page">
+      <div className="container docs-layout">
+        <aside
+          className="docs-sidebar"
+          aria-label="Documentation navigation"
+        >
+          <div className="docs-sidebar-heading">
+            <span className="docs-sidebar-kicker">
+              DEVELOPER GUIDE
+            </span>
+            <strong>API documentation</strong>
+          </div>
+
+          <nav className="docs-nav">
+            {sections.map((section) => (
+              <a
+                className="docs-link"
+                href={`#${section.id}`}
+                key={section.id}
+                onClick={(event) =>
+                  navigateToSection(event, section.id)
+                }
+              >
+                {section.label}
+              </a>
+            ))}
+          </nav>
+
+          <div className="docs-sidebar-footer">
+            <span className="docs-sidebar-status-dot" />
+            <span>API reference</span>
+          </div>
+        </aside>
+
+        <div className="docs-content">
+          <section
+            className="docs-section docs-overview-section"
+            id="overview"
+          >
+            <div className="docs-intro">
+              <p className="docs-eyebrow">
+                OPENTEXT · DEVELOPER API
+              </p>
+
+              <div className="docs-title-row">
+                <div>
+                  <h1>OpenText Markdown Converter</h1>
+                  <p className="docs-description">
+                    Convert OpenText support articles into Markdown
+                    for documentation, integrations, and downstream
+                    tools. Use the API endpoints below to check
+                    service health, retrieve article content, and
+                    create an API key.
+                  </p>
+                </div>
+
+                <span className="docs-version-badge">REST API</span>
+              </div>
+            </div>
+
+            <div className="docs-api-url">
+              <div className="docs-api-url-heading">
+                <div>
+                  <strong>Base URL</strong>
+                  <p>All API requests use this base address.</p>
+                </div>
+
+                <span className="docs-api-status">
+                  <span className="docs-api-status-dot" />
+                  HTTPS
+                </span>
+              </div>
+
+              <div className="docs-api-url-value">
+                <code>{API_BASE_URL}</code>
+                <button
+                  className="docs-copy-button"
+                  type="button"
+                  onClick={copyBaseUrl}
+                >
+                  {copiedBaseUrl ? 'Copied' : 'Copy URL'}
+                </button>
+              </div>
+            </div>
+
+            <div className="docs-endpoints-heading">
+              <div>
+                <h2>Endpoints</h2>
+                <p>
+                  Available routes and authentication requirements.
+                </p>
+              </div>
+
+              <span className="docs-endpoint-count">
+                3 endpoints
+              </span>
+            </div>
+
+            <div className="docs-table-wrap">
+              <table className="docs-route-table">
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Endpoint</th>
+                    <th>Description</th>
+                    <th>Authentication</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  <tr>
+                    <td><MethodBadge method="GET" /></td>
+                    <td>
+                      <a
+                        className="docs-endpoint-link"
+                        href="#health"
+                        onClick={(event) =>
+                          navigateToSection(event, 'health')
+                        }
+                      >
+                        <code>/api/v1/health</code>
+                      </a>
+                    </td>
+                    <td>Check API availability</td>
+                    <td>
+                      <span className="docs-auth-pill docs-auth-public">
+                        Public
+                      </span>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td><MethodBadge method="GET" /></td>
+                    <td>
+                      <a
+                        className="docs-endpoint-link"
+                        href="#articles"
+                        onClick={(event) =>
+                          navigateToSection(event, 'articles')
+                        }
+                      >
+                        <code>/api/v1/articles</code>
+                      </a>
+                    </td>
+                    <td>Retrieve an article as Markdown</td>
+                    <td>
+                      <span className="docs-auth-pill">API key</span>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td><MethodBadge method="POST" /></td>
+                    <td>
+                      <a
+                        className="docs-endpoint-link"
+                        href="#generate-key"
+                        onClick={(event) =>
+                          navigateToSection(event, 'generate-key')
+                        }
+                      >
+                        <code>/api/v1/generate-key</code>
+                      </a>
+                    </td>
+                    <td>Generate an API key</td>
+                    <td>
+                      <span className="docs-auth-pill docs-auth-public">
+                        Public
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="docs-notice">
+              <span className="docs-notice-icon">i</span>
+              <div>
+                <strong>Authentication</strong>
+                <p>
+                  Include your key in the <code>x-api-key</code>{' '}
+                  request header when calling protected endpoints.
+                  Do not expose production keys in client-side code
+                  or public repositories.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="docs-section" id="health">
+            <div className="docs-section-header">
+              <div>
+                <p className="docs-eyebrow">ENDPOINT 01</p>
+                <h2>Health check</h2>
+              </div>
+              <MethodBadge method="GET" />
+            </div>
+
+            <p>
+              Checks whether the API service is responding. This
+              endpoint does not require an API key.
+            </p>
+
+            <div className="docs-endpoint-summary">
+              <code>GET /api/v1/health</code>
+              <span className="docs-auth-pill docs-auth-public">
+                No authentication
+              </span>
+            </div>
+
+            <h3 className="docs-subheading">Example request</h3>
+            <CodeExamplePanel
+              examples={healthExamples}
+              id="health-example"
             />
 
+            <h3 className="docs-subheading">Successful response</h3>
             <p>
-              Use force refresh when an article may have changed. Normal
-              requests are recommended for routine reads. Refreshing cannot
-              guarantee that changes are immediately available from the
-              upstream OpenText service.
+              The service returns HTTP <code>200 OK</code> with a
+              small JSON status object.
             </p>
           </section>
 
-          <section id="generate-key" className="docs-section">
+          <section className="docs-section" id="articles">
             <div className="docs-section-header">
               <div>
-                <p className="docs-eyebrow">Endpoint</p>
-                <h2>POST /api/v1/generate-key</h2>
+                <p className="docs-eyebrow">ENDPOINT 02</p>
+                <h2>Convert an article</h2>
               </div>
+              <MethodBadge method="GET" />
             </div>
 
             <p>
-              Requests an API key. The example response is illustrative;
-              actual key generation and access policies depend on the backend.
+              Retrieves an OpenText support article using the
+              required <code>url</code> query parameter. Set the{' '}
+              <code>Accept</code> header to choose the response format.
             </p>
 
-            <CodeExamplePanel id="generate-key" examples={keyExamples} />
-          </section>
-
-          <section id="errors" className="docs-section">
-            <div className="docs-section-header">
-              <div>
-                <p className="docs-eyebrow">Errors</p>
-                <h2>Error responses</h2>
-              </div>
+            <div className="docs-endpoint-summary">
+              <code>GET /api/v1/articles</code>
+              <span className="docs-auth-pill">
+                Authentication required
+              </span>
             </div>
 
+            <h3 className="docs-subheading">Request requirements</h3>
+            <ul>
+              <li>
+                <strong>Authentication:</strong> include your API
+                key in the <code>x-api-key</code> header.
+              </li>
+              <li>
+                <strong>Required query parameter:</strong>{' '}
+                <code>url</code> — an OpenText support article URL.
+              </li>
+              <li>
+                <strong>Optional query parameter:</strong>{' '}
+                <code>forceRefresh=true</code> — requests a fresh
+                article and triggers the backend cache-invalidation
+                workflow.
+              </li>
+              <li>
+                <strong>Example article:</strong>{' '}
+                <a
+                  href={ARTICLE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="docs-inline-link"
+                >
+                  {ARTICLE_URL}
+                </a>
+              </li>
+            </ul>
+
+            <h3 className="docs-subheading">Query parameters</h3>
+            <div className="docs-table-wrap">
+              <table className="docs-route-table docs-parameter-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>url</code></td>
+                    <td>string</td>
+                    <td>Yes</td>
+                    <td>
+                      Absolute URL of the OpenText support article
+                      to retrieve and convert.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>forceRefresh</code></td>
+                    <td>boolean</td>
+                    <td>No</td>
+                    <td>
+                      Set to <code>true</code> to request a fresh
+                      article and run the backend refresh and
+                      cache-invalidation workflow.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="docs-subheading">Choose a response format</h3>
+            <div className="docs-table-wrap">
+              <table className="docs-route-table docs-parameter-table">
+                <thead>
+                  <tr>
+                    <th>Accept header</th>
+                    <th>Response</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>text/markdown</code></td>
+                    <td>
+                      Returns article front matter, converted
+                      article content, and attachment links as
+                      Markdown text.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>application/json</code></td>
+                    <td>
+                      Returns article metadata and a{' '}
+                      <code>markdown</code> field containing the
+                      converted content.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>*/*</code> or omitted</td>
+                    <td>Defaults to Markdown.</td>
+                  </tr>
+                  <tr>
+                    <td>Unsupported media type</td>
+                    <td>
+                      Returns HTTP <code>406 Not Acceptable</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="docs-subheading">
+              Example requests and response
+            </h3>
+            <CodeExamplePanel
+              examples={articleExamples}
+              id="article-example"
+            />
+
+            <h3 className="docs-subheading">Cache behavior</h3>
             <p>
-              Error responses contain an error description. The exact response
-              fields depend on the error handler and endpoint.
+              Article responses are cached by CloudFront to reduce
+              repeated upstream requests and improve response times.
             </p>
 
             <ul>
-              <li><strong>400</strong> — invalid URL or malformed request.</li>
-              <li><strong>401</strong> — missing or invalid API key.</li>
-              <li><strong>403</strong> — forbidden.</li>
-              <li><strong>404</strong> — route not found.</li>
-              <li><strong>406</strong> — unsupported response format.</li>
-              <li><strong>413</strong> — request body too large.</li>
-              <li><strong>429</strong> — too many requests.</li>
-              <li><strong>500</strong> — internal server error.</li>
-              <li><strong>502</strong> — upstream service failure.</li>
-              <li><strong>503</strong> — authentication service unavailable.</li>
-              <li><strong>504</strong> — upstream timeout.</li>
+              <li>
+                <strong>Normal request:</strong> a cached response
+                can be returned when available. The configured
+                shared-cache lifetime is 24 hours.
+              </li>
+              <li>
+                <strong>Cache age:</strong> read the CloudFront{' '}
+                <code>Age</code> response header to see how many
+                seconds the response has been cached. For example,{' '}
+                <code>Age: 3600</code> means the cached response is
+                approximately one hour old. This is cache age, not
+                the article's publication or update time.
+              </li>
+              <li>
+                <strong>Force refresh:</strong> add{' '}
+                <code>forceRefresh=true</code> to request a fresh
+                article. The backend runs its refresh and
+                cache-invalidation workflow.
+              </li>
+              <li>
+                <strong>After refreshing:</strong> the next normal
+                request may initially miss the cache while
+                CloudFront retrieves and caches the refreshed
+                response.
+              </li>
             </ul>
 
-            <CodeExamplePanel id="errors" examples={errorExamples} />
+            <div className="docs-cache-headers">
+              <div>
+                <span>Normal response</span>
+                <code>
+                  Cache-Control: public, max-age=0, s-maxage=86400
+                </code>
+              </div>
+              <div>
+                <span>Force-refresh response</span>
+                <code>Cache-Control: no-store</code>
+              </div>
+            </div>
+
+            <h3 className="docs-subheading">Read the cache age</h3>
+            <p>
+              Use the <code>Age</code> response header to check the
+              age of a cached response. It may be absent on a cache
+              miss. In browsers, the API must expose this header
+              through CORS using{' '}
+              <code>Access-Control-Expose-Headers: Age</code>.
+            </p>
+
+            <CodeExamplePanel
+              examples={cacheAgeExamples}
+              id="cache-age-example"
+            />
+
+            <h3 className="docs-subheading">Force refresh</h3>
+            <p>
+              Use force refresh when an article may have changed.
+              Normal requests are recommended for routine reads.
+              Refreshing cannot guarantee that changes are
+              immediately available from the upstream OpenText
+              service.
+            </p>
+
+            <CodeExamplePanel
+              examples={refreshExamples}
+              id="refresh-example"
+            />
+
+            <div className="docs-notice">
+              <span className="docs-notice-icon">i</span>
+              <div>
+                <strong>Cache invalidation timing</strong>
+                <p>
+                  A forced refresh starts the backend refresh and
+                  cache-invalidation workflow, but it cannot
+                  guarantee that the upstream article has already
+                  been updated. After refreshing, a subsequent
+                  normal request may need to repopulate the
+                  CloudFront cache.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="docs-section" id="generate-key">
+            <div className="docs-section-header">
+              <div>
+                <p className="docs-eyebrow">ENDPOINT 03</p>
+                <h2>Generate an API key</h2>
+              </div>
+              <MethodBadge method="POST" />
+            </div>
+
+            <p>
+              Requests a new API key for accessing protected
+              endpoints. Treat the returned key as a secret.
+            </p>
+
+            <div className="docs-endpoint-summary">
+              <code>POST /api/v1/generate-key</code>
+              <span className="docs-auth-pill docs-auth-public">
+                No API key required
+              </span>
+            </div>
+
+            <h3 className="docs-subheading">
+              Example request and response
+            </h3>
+            <CodeExamplePanel
+              examples={keyExamples}
+              id="key-example"
+            />
+
+            <div className="docs-notice docs-notice-warning">
+              <span className="docs-notice-icon">!</span>
+              <div>
+                <strong>Keep your key private</strong>
+                <p>
+                  Do not commit real API keys to source control,
+                  include them in screenshots, or embed them in a
+                  public frontend bundle. Store secrets in an
+                  appropriate server-side secret store.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="docs-section" id="errors">
+            <div className="docs-section-header">
+              <div>
+                <p className="docs-eyebrow">REFERENCE</p>
+                <h2>Errors and status codes</h2>
+              </div>
+            </div>
+
+            <p>
+              When a request fails, the API returns an HTTP status
+              code that indicates the category of failure. The
+              response body may contain additional details.
+            </p>
+
+            <div className="docs-table-wrap">
+              <table className="docs-route-table docs-errors-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Name</th>
+                    <th>Meaning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span className="docs-status-code">400</span></td>
+                    <td>Bad Request</td>
+                    <td>A required parameter is missing or invalid.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">401</span></td>
+                    <td>Unauthorized</td>
+                    <td>Authentication is missing or invalid.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">403</span></td>
+                    <td>Forbidden</td>
+                    <td>The request is not permitted.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">404</span></td>
+                    <td>Not Found</td>
+                    <td>The requested route or article could not be found.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">406</span></td>
+                    <td>Not Acceptable</td>
+                    <td>The requested response format is not supported.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">413</span></td>
+                    <td>Payload Too Large</td>
+                    <td>The request exceeds the configured size limit.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">429</span></td>
+                    <td>Too Many Requests</td>
+                    <td>The request rate limit has been exceeded.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">500</span></td>
+                    <td>Internal Server Error</td>
+                    <td>An unexpected server-side error occurred.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">502</span></td>
+                    <td>Bad Gateway</td>
+                    <td>An upstream service returned an invalid response.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">503</span></td>
+                    <td>Service Unavailable</td>
+                    <td>The service is temporarily unavailable.</td>
+                  </tr>
+                  <tr>
+                    <td><span className="docs-status-code">504</span></td>
+                    <td>Gateway Timeout</td>
+                    <td>An upstream request took too long to complete.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="docs-subheading">Example error response</h3>
+            <CodeExamplePanel
+              examples={errorExamples}
+              id="error-example"
+            />
+
+            <div className="docs-section-footer">
+              <span className="docs-sidebar-status-dot" />
+              End of API reference
+            </div>
           </section>
         </div>
       </div>
